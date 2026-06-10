@@ -1,0 +1,20 @@
+# Python / uv
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+.pytest_cache/
+.ruff_cache/
+
+# Secrets — NUNCA al repo (Master KEK siempre offline)
+.env
+.env.*
+*.key
+*.pem
+secrets/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

@@ -1,0 +1,10 @@
+[project]
+name = "for3s-core"
+version = "0.0.1"
+description = "For3s OS — núcleo compartido (primer package del monorepo)"
+requires-python = ">=3.12,<3.13"
+dependencies = []
+
+[build-system]
+requires = ["uv_build>=0.7"]
+build-backend = "uv_build"
