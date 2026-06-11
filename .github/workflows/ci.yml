@@ -9,11 +9,30 @@ jobs:
   quality:
     name: Lint + Types + Tests
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: for3s
+          POSTGRES_PASSWORD: for3s_ci
+          POSTGRES_DB: for3s
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U for3s"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+asyncpg://for3s:for3s_ci@localhost:5432/for3s
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.12"
+      - name: Habilitar extensiones (pgcrypto)
+        run: |
+          PGPASSWORD=for3s_ci psql -h localhost -U for3s -d for3s -c "CREATE EXTENSION IF NOT EXISTS pgcrypto;"
       - name: Sync deps
         run: uv sync --all-packages
       - name: Lint (ruff)
@@ -22,7 +41,7 @@ jobs:
         run: uv run ruff format --check .
       - name: Types (ty)
         run: uv run ty check
-      - name: Tests (pytest)
+      - name: Tests (pytest, incluye integración contra Postgres)
         run: uv run pytest -q
 
   security:

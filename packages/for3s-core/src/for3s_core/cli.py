@@ -33,7 +33,7 @@ async def run(session_id: str) -> int:
         return 1
 
     pool = await db.connect(settings.database_url)
-    await db.apply_schema(pool)
+    await db.apply_migrations(pool)
 
     provider = ClaudeProvider(
         token=settings.anthropic_token, oauth=settings.is_oauth, model=settings.model
