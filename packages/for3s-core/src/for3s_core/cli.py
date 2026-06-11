@@ -17,7 +17,7 @@ from for3s_core import db
 from for3s_core.agent import Agent
 from for3s_core.config import load_settings
 from for3s_core.conversation import Conversation
-from for3s_core.llm import ClaudeProvider
+from for3s_core.llm import ClaudeProvider, RateLimitExceeded
 
 console = Console()
 
@@ -73,8 +73,15 @@ async def run(session_id: str) -> int:
             if not msg:
                 continue
 
-            with console.status("[cyan]For3s pensando...[/cyan]"):
-                resp = await convo.send(msg)
+            try:
+                with console.status("[cyan]For3s pensando...[/cyan]"):
+                    resp = await convo.send(msg)
+            except RateLimitExceeded as exc:
+                console.print(f"[yellow]⏳ {exc}[/yellow]\n")
+                continue
+            except KeyboardInterrupt:
+                console.print("\n[dim]cancelado.[/dim]\n")
+                continue
 
             console.print(Panel(resp.text, title="For3s", border_style="green"))
             console.print(

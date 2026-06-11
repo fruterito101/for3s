@@ -31,6 +31,22 @@ OAUTH_BETA = "oauth-2025-04-20"
 
 CLAUDE_CODE_IDENTITY = "You are Claude Code, Anthropic's official CLI for Claude."
 
+# Si el retry-after supera esto (seg), NO esperamos: avisamos al usuario.
+MAX_WAIT_SECONDS = 60
+
+
+class RateLimitExceeded(Exception):
+    """La cuenta topó su cupo y el retry-after es demasiado largo."""
+
+    def __init__(self, retry_after: float) -> None:
+        self.retry_after = retry_after
+        mins = int(retry_after // 60)
+        super().__init__(
+            f"La cuenta de Claude topó su cupo. Reinicia en ~{mins} min. "
+            "Usa otra cuenta/API key o intenta más tarde."
+        )
+
+
 _PRICES = {
     "claude-sonnet-4-6": (3.0, 15.0),
     "claude-opus-4-7": (15.0, 75.0),
@@ -110,8 +126,11 @@ class ClaudeProvider(LLMProvider):
 
             if resp.status_code == 429:
                 # CAPA 3: respeta el retry-after exacto
+                wait = parse_retry_after(resp.headers)
+                if wait > MAX_WAIT_SECONDS:
+                    raise RateLimitExceeded(wait)
                 if attempt < max_retries - 1:
-                    self._sleep(parse_retry_after(resp.headers))
+                    self._sleep(wait)
                     continue
                 resp.raise_for_status()
 
