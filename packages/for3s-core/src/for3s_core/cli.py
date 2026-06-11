@@ -22,6 +22,18 @@ from for3s_core.llm import ClaudeProvider
 console = Console()
 
 
+def _force_utf8() -> None:
+    """Forzar UTF-8 en la terminal (Windows CMD/PowerShell usa otro encoding
+    y rompe la lectura con UnicodeDecodeError). Se llama al arrancar el CLI."""
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            try:
+                reconfigure(encoding="utf-8", errors="replace")
+            except ValueError:
+                pass
+
+
 async def run(session_id: str) -> int:
     try:
         settings = load_settings()
@@ -75,6 +87,7 @@ async def run(session_id: str) -> int:
 
 def main() -> int:
     session_id = "cli-default"
+    _force_utf8()
     args = sys.argv[1:]
     if "--session" in args:
         i = args.index("--session")
