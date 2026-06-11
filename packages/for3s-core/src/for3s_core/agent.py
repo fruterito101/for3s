@@ -1,9 +1,13 @@
-"""Agente mínimo de For3s OS (H1) — arma el prompt y llama al LLM.
+"""Agente de For3s OS — arma el prompt y llama al LLM.
 
 H1.4 prompt builder mínimo. En modo OAuth (suscripción) el system DEBE ser
 solo la identidad de Claude Code (Anthropic rechaza system custom con 429),
 así que el rol de For3s se antepone al MENSAJE del usuario. En modo API key
 el rol va en el system, como es natural. En H10+ esto se vuelve el PFC.
+
+H2 — añade ask_with_history(): recibe el historial de la conversación
+(reconstruido desde Postgres) para que For3s "recuerde". El Agent sigue
+PURO: no toca la BD; recibe el historial ya armado.
 """
 
 from __future__ import annotations
@@ -17,7 +21,7 @@ FOR3S_ROLE = (
 
 
 class Agent:
-    """El agente H1: una sola pieza, sin memoria todavía."""
+    """El agente: arma el prompt con rol + historial y llama al provider."""
 
     def __init__(self, provider: LLMProvider) -> None:
         self._provider = provider
@@ -25,8 +29,38 @@ class Agent:
         self._oauth = isinstance(provider, ClaudeProvider) and getattr(provider, "_oauth", False)
 
     def ask(self, message: str, *, max_tokens: int = 1024) -> LLMResponse:
+        """Turno único sin memoria (H1). Se mantiene por compatibilidad."""
         if self._oauth:
-            # El rol va en el mensaje, no en el system (la suscripción lo exige).
             prompt = f"[{FOR3S_ROLE}]\n\n{message}"
             return self._provider.complete(prompt, system="", max_tokens=max_tokens)
         return self._provider.complete(message, system=FOR3S_ROLE, max_tokens=max_tokens)
+
+    def ask_with_history(
+        self, history: list[dict[str, str]], *, max_tokens: int = 1024
+    ) -> LLMResponse:
+        """Turno CON memoria (H2): history = [{role, content}, ...] en orden.
+
+        El último elemento es el mensaje actual del usuario. For3s ve toda
+        la conversación previa como contexto → "recuerda".
+        """
+        # Aplana el historial a un único prompt legible (en H5/R3 esto pasará
+        # a usar el formato messages[] nativo con truncado inteligente).
+        lines: list[str] = []
+        for turn in history:
+            who = "Usuario" if turn["role"] == "user" else "For3s"
+            lines.append(f"{who}: {turn['content']}")
+        transcript = "\n\n".join(lines)
+
+        if self._oauth:
+            prompt = (
+                f"[{FOR3S_ROLE}]\n\n"
+                "Esta es la conversación hasta ahora (úsala como memoria):\n\n"
+                f"{transcript}\n\n"
+                "Responde al último mensaje del Usuario."
+            )
+            return self._provider.complete(prompt, system="", max_tokens=max_tokens)
+
+        prompt = (
+            f"Conversación hasta ahora:\n\n{transcript}\n\nResponde al último mensaje del Usuario."
+        )
+        return self._provider.complete(prompt, system=FOR3S_ROLE, max_tokens=max_tokens)

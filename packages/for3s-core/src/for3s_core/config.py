@@ -4,6 +4,8 @@ H1.1 — soporta los DOS modos de auth con Claude:
   • oauth  → token de suscripción (sk-ant-oat01-...), sin pago por consumo.
   • apikey → API key estándar (sk-ant-api03-...), pago por token.
 El modo se autodetecta por el prefijo del token, o se fuerza con FOR3S_AUTH_MODE.
+
+H2 — añade database_url (PostgreSQL) para la memoria persistente.
 """
 
 from __future__ import annotations
@@ -34,6 +36,7 @@ class Settings:
     anthropic_token: str
     auth_mode: str  # "oauth" | "apikey"
     model: str
+    database_url: str
 
     @property
     def is_oauth(self) -> bool:
@@ -60,4 +63,7 @@ def load_settings(env_path: Path | None = None) -> Settings:
         auth_mode = "apikey"
 
     model = os.environ.get("FOR3S_MODEL", "claude-sonnet-4-6").strip()
-    return Settings(anthropic_token=token, auth_mode=auth_mode, model=model)
+    database_url = os.environ.get("DATABASE_URL", "").strip()
+    return Settings(
+        anthropic_token=token, auth_mode=auth_mode, model=model, database_url=database_url
+    )
