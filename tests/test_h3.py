@@ -48,3 +48,23 @@ def test_owner_rechaza_a_otros(tmp_path) -> None:
     store.set_owner(777)
     assert store.is_authorized(999) is False
     assert store.is_authorized(None) is False
+
+
+def test_cupo_normal_muestra_porcentaje() -> None:
+    from for3s_core.telegram_channel import format_cupo
+
+    out = format_cupo(0.23, 0.10)
+    assert "23%" in out and "🔋" in out
+
+
+def test_cupo_alerta_al_80() -> None:
+    from for3s_core.telegram_channel import format_cupo
+
+    out = format_cupo(0.82, 0.50)
+    assert "⚠️" in out and "82%" in out and "18%" in out
+
+
+def test_cupo_sin_dato_vacio() -> None:
+    from for3s_core.telegram_channel import format_cupo
+
+    assert format_cupo(None, None) == ""

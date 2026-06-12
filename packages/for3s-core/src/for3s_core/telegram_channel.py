@@ -10,6 +10,9 @@ lista = denegar por default") + split de respuestas a 4,096 chars.
 Acceso (decisión de Brian 2026-06-11): el PRIMER /start registra al dueño;
 después, todo lo demás queda bloqueado. El dueño comparte memoria con el CLI
 (sesión "brian"). Multi-usuario formal llega en H13 (auth/RBAC).
+
+Cupo (decisión de Brian 2026-06-11): cada respuesta muestra el cupo de la
+suscripción usado; a partir del 80% alerta visible; /cupo lo consulta.
 """
 
 from __future__ import annotations
@@ -39,6 +42,9 @@ logger = logging.getLogger("for3s.telegram")
 # Límite real de Telegram por mensaje (lección Hermes: partir respuestas largas).
 MAX_MESSAGE_LENGTH = 4096
 
+# A partir de este % de cupo usado (suscripción, ventana 5h) → alerta visible.
+ALERT_THRESHOLD = 0.80
+
 
 def split_message(text: str, limit: int = MAX_MESSAGE_LENGTH) -> list[str]:
     """Parte un texto en pedazos <= limit, cortando por párrafo/línea si se puede."""
@@ -57,6 +63,26 @@ def split_message(text: str, limit: int = MAX_MESSAGE_LENGTH) -> list[str]:
     if rest:
         chunks.append(rest)
     return chunks
+
+
+def format_cupo(usage_5h: float | None, usage_7d: float | None) -> str:
+    """Pie de cupo de la suscripción. Alerta a partir del 80% usado.
+
+    usage_* viene 0..1 (fracción usada). Devuelve "" si no hay dato.
+    """
+    if usage_5h is None:
+        return ""
+    pct = int(round(usage_5h * 100))
+    libre = 100 - pct
+    if usage_5h >= ALERT_THRESHOLD:
+        return (
+            f"⚠️ CUPO 5h al {pct}% usado — te queda {libre}%. "
+            "Si llega a 100% espero a que se reinicie (no se pierde nada)."
+        )
+    extra = ""
+    if usage_7d is not None:
+        extra = f" · 7d: {int(round(usage_7d * 100))}%"
+    return f"🔋 cupo 5h: {pct}% usado{extra}"
 
 
 class OwnerStore:
@@ -120,12 +146,31 @@ class TelegramChannel:
             logger.info("dueño registrado: %s (%s)", user.id, user.full_name)
             await update.message.reply_text(
                 "👑 Quedaste registrado como dueño de For3s OS.\n"
-                "Escríbeme lo que quieras — recuerdo nuestras conversaciones."
+                "Escríbeme lo que quieras — recuerdo nuestras conversaciones.\n"
+                "Usa /cupo para ver cuánto te queda de tu suscripción."
             )
         elif user.id == owner:
-            await update.message.reply_text("🦊 Hola de nuevo. Te escucho.")
+            await update.message.reply_text("🦊 Hola de nuevo. Te escucho. (/cupo para tu cupo)")
         else:
             await update.message.reply_text("⛔ Este bot es privado.")
+
+    async def on_cupo(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        msg = update.message
+        user = update.effective_user
+        if msg is None or user is None:
+            return
+        if not self._owners.is_authorized(user.id):
+            await msg.reply_text("⛔ Este bot es privado.")
+            return
+        assert self._agent is not None
+        try:
+            # llamada mínima solo para leer los headers de cupo actuales
+            resp = self._agent.ask_with_history([{"role": "user", "content": "ok"}], max_tokens=5)
+        except RateLimitExceeded as exc:
+            await msg.reply_text(f"⏳ {exc}")
+            return
+        cupo = format_cupo(resp.usage_5h, resp.usage_7d)
+        await msg.reply_text(cupo if cupo else "🔋 cupo no disponible ahora mismo.")
 
     async def on_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         user = update.effective_user
@@ -157,6 +202,11 @@ class TelegramChannel:
         for chunk in split_message(resp.text):
             await msg.reply_text(chunk)
 
+        # pie de cupo / alerta al 80% (decisión de Brian)
+        cupo = format_cupo(resp.usage_5h, resp.usage_7d)
+        if cupo:
+            await msg.reply_text(cupo)
+
 
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
@@ -176,6 +226,7 @@ def main() -> int:
         .build()
     )
     app.add_handler(CommandHandler("start", channel.on_start))
+    app.add_handler(CommandHandler("cupo", channel.on_cupo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, channel.on_message))
 
     logger.info("For3s OS Telegram: arrancando polling...")

@@ -62,6 +62,8 @@ class LLMResponse:
     input_tokens: int
     output_tokens: int
     model: str
+    usage_5h: float | None = None  # cupo suscripción usado en 5h (0..1)
+    usage_7d: float | None = None  # cupo suscripción usado en 7d (0..1)
 
     @property
     def cost_usd(self) -> float:
@@ -116,7 +118,7 @@ class ClaudeProvider(LLMProvider):
     def _request_once(self, payload: dict) -> httpx.Response:
         return httpx.post(API_URL, headers=self._headers(), json=payload, timeout=self._timeout)
 
-    def _post(self, payload: dict, *, est_in: int, est_out: int, max_retries: int = 5) -> dict:
+    def _post(self, payload: dict, *, est_in: int, est_out: int, max_retries: int = 5):
         """CAPA 1 (acquire) + CAPA 3 (backoff retry-after) + CAPA 2 (report headers)."""
         for attempt in range(max_retries):
             # CAPA 1: pide turno al gestor (cede paso si no hay cuota)
@@ -137,7 +139,7 @@ class ClaudeProvider(LLMProvider):
             resp.raise_for_status()
             # CAPA 2: aprende de los headers cuánta cuota queda
             self._manager.report(self._model, parse_ratelimit_headers(resp.headers))
-            return resp.json()
+            return resp.json(), resp.headers
 
         raise RuntimeError("agotados los reintentos por rate limit (429)")
 
@@ -155,7 +157,7 @@ class ClaudeProvider(LLMProvider):
 
         # estimación gruesa de tokens para el gestor (R3 refinará con tokenizer)
         est_in = max(100, len(user_message) // 3 + len(full_system) // 3)
-        data = self._post(payload, est_in=est_in, est_out=max_tokens)
+        data, resp_headers = self._post(payload, est_in=est_in, est_out=max_tokens)
 
         text = "".join(
             block.get("text", "")
@@ -163,9 +165,19 @@ class ClaudeProvider(LLMProvider):
             if block.get("type") == "text"
         )
         usage = data.get("usage", {})
+
+        def _pct(name: str) -> float | None:
+            v = resp_headers.get(name)
+            try:
+                return float(v) if v is not None else None
+            except (ValueError, TypeError):
+                return None
+
         return LLMResponse(
             text=text,
             input_tokens=usage.get("input_tokens", 0),
             output_tokens=usage.get("output_tokens", 0),
             model=data.get("model", self._model),
+            usage_5h=_pct("anthropic-ratelimit-unified-5h-utilization"),
+            usage_7d=_pct("anthropic-ratelimit-unified-7d-utilization"),
         )
