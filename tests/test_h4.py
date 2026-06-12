@@ -102,3 +102,33 @@ def test_pr_to_context_avisa_omitidos() -> None:
         omitted_files=70,
     )
     assert "OMITIDOS" in pr_to_context(pr)
+
+
+# ---- sandbox (lint en contenedor) ----
+
+
+def test_sandbox_sin_archivos_py_devuelve_vacio() -> None:
+    from for3s_core import sandbox
+
+    assert sandbox.lint_archivos({"README.md": "# hola"}) == ""
+
+
+def test_sandbox_archivos_vacios_devuelve_vacio() -> None:
+    from for3s_core import sandbox
+
+    assert sandbox.lint_archivos({}) == ""
+
+
+def test_patch_to_source_extrae_lineas_anadidas() -> None:
+    from for3s_core.github_tool import PRFile
+
+    f = PRFile(
+        filename="x.py",
+        status="modified",
+        additions=1,
+        deletions=1,
+        patch="@@ -1,2 +1,2 @@\n contexto\n-vieja\n+nueva linea\n",
+    )
+    src = f.patch_to_source()
+    assert "nueva linea" in src
+    assert "vieja" not in src

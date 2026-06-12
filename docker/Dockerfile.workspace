@@ -1,0 +1,17 @@
+# For3s OS — imagen del workspace de análisis (H4).
+# Contenedor AISLADO donde corre el lint del código de un PR. Solo lleva
+# herramientas de análisis (ruff); NO ejecuta el código, solo lo inspecciona.
+# Endurecido en runtime: sin red, sin root, read-only, límites de recursos
+# (esos flags se pasan en `docker run`, ver sandbox.py).
+FROM python:3.12-slim
+
+# usuario sin privilegios
+RUN useradd --create-home --uid 10001 analyst
+
+# solo ruff (linter rápido). Sin pip de paquetes del proyecto: no ejecutamos código.
+RUN pip install --no-cache-dir ruff==0.15.16
+
+USER analyst
+WORKDIR /work
+# el código del PR se monta read-only en /work; el comando lo pasa sandbox.py
+ENTRYPOINT ["ruff"]

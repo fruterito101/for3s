@@ -39,6 +39,25 @@ class PRFile:
     patch: str  # diff del archivo (posiblemente truncado)
     truncated: bool = False
 
+    def patch_to_source(self) -> str:
+        """Aproxima el código NUEVO desde el diff: toma las líneas añadidas (+).
+
+        No es el archivo completo (el diff solo trae el contexto del cambio),
+        pero sirve para que el linter detecte problemas en lo que se agregó.
+        Las líneas de contexto (sin +/-) también se incluyen para dar sintaxis.
+        """
+        lines = []
+        for raw in self.patch.splitlines():
+            if raw.startswith("@@") or raw.startswith("---") or raw.startswith("+++"):
+                continue
+            if raw.startswith("+"):
+                lines.append(raw[1:])
+            elif raw.startswith("-"):
+                continue  # línea eliminada: no va al código nuevo
+            else:
+                lines.append(raw[1:] if raw.startswith(" ") else raw)
+        return "\n".join(lines)
+
 
 @dataclass
 class PullRequest:

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import asyncpg
 
-from for3s_core import audit
+from for3s_core import audit, sandbox
 from for3s_core.github_tool import GitHubTool, GitHubToolError, parse_pr_url, pr_to_context
 from for3s_core.secret_store import SecretStore
 
@@ -38,18 +38,10 @@ REPORTE estructurado EXACTAMENTE con este formato (en español, conciso):
 Sé directo y específico. Cita archivos/líneas cuando puedas."""
 
 
-async def analizar_pr(
-    pool: asyncpg.Pool,
-    workspace_id: str,
-    text: str,
-    *,
-    lint_findings: str = "",
-) -> str | None:
+async def analizar_pr(pool: asyncpg.Pool, workspace_id: str, text: str) -> str | None:
     """Si el texto trae un URL de PR, devuelve el MENSAJE ENRIQUECIDO para el
-    agente (contexto del PR + instrucciones QA). Si no hay URL, devuelve None
-    (el mensaje sigue su flujo normal de chat).
-
-    lint_findings: hallazgos objetivos del lint en contenedor (H4.6), opcional.
+    agente (contexto del PR + lint objetivo en sandbox + instrucciones QA).
+    Si no hay URL, devuelve None (el mensaje sigue su flujo normal de chat).
     """
     parsed = parse_pr_url(text)
     if parsed is None:
@@ -86,6 +78,9 @@ async def analizar_pr(
         },
     )
 
+    # lint OBJETIVO en sandbox Docker aislado (degrada a "" si no hay Docker)
+    archivos = {f.filename: f.patch_to_source() for f in pr.files}
+    lint_findings = sandbox.lint_archivos(archivos)
     lint_block = ""
     if lint_findings:
         lint_block = (
