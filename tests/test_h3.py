@@ -68,3 +68,21 @@ def test_cupo_sin_dato_vacio() -> None:
     from for3s_core.telegram_channel import format_cupo
 
     assert format_cupo(None, None) == ""
+
+
+def test_md_to_telegram_quita_negritas() -> None:
+    from for3s_core.telegram_channel import md_to_telegram
+
+    assert md_to_telegram("Soy **For3s OS**") == "Soy For3s OS"
+
+
+def test_md_to_telegram_quita_cursiva_y_code() -> None:
+    from for3s_core.telegram_channel import md_to_telegram
+
+    assert md_to_telegram("usa *esto* y `codigo`") == "usa esto y codigo"
+
+
+def test_md_to_telegram_texto_normal_intacto() -> None:
+    from for3s_core.telegram_channel import md_to_telegram
+
+    assert md_to_telegram("hola mundo, 2*3=6") == "hola mundo, 2*3=6"

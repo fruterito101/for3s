@@ -24,16 +24,19 @@ from for3s_core.llm import LLMResponse
 class Conversation:
     """Una conversación persistente atada a una sesión."""
 
-    def __init__(self, pool: asyncpg.Pool, agent: Agent, session_id: str) -> None:
+    def __init__(
+        self, pool: asyncpg.Pool, agent: Agent, session_id: str, channel: str = "cli"
+    ) -> None:
         self._pool = pool
         self._agent = agent
         self._session_id = session_id
+        self._channel = channel
 
     async def history(self) -> list[memory.Turn]:
         return await memory.load_history(self._pool, self._session_id)
 
     async def send(self, message: str, *, max_tokens: int = 1024) -> LLMResponse:
-        await memory.ensure_session(self._pool, self._session_id)
+        await memory.ensure_session(self._pool, self._session_id, channel=self._channel)
 
         # 1) guardar turno del usuario + audit
         await memory.record_turn(self._pool, self._session_id, role="user", content=message)

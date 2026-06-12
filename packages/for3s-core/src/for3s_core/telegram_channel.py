@@ -46,6 +46,23 @@ MAX_MESSAGE_LENGTH = 4096
 ALERT_THRESHOLD = 0.80
 
 
+def md_to_telegram(text: str) -> str:
+    """Limpia los marcadores de markdown crudos para que no se vean en Telegram.
+
+    NO usamos parse_mode de Telegram porque rechaza el mensaje entero si el
+    markdown está mal balanceado (un * suelto de Claude). En vez de eso,
+    quitamos los marcadores (**negrita**, *cursiva*, `code`) → texto limpio,
+    sin asteriscos/backticks de ruido, y sin riesgo de que falle el envío.
+    """
+    import re
+
+    text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)  # **negrita**
+    text = re.sub(r"__(.+?)__", r"\1", text)  # __negrita__
+    text = re.sub(r"(?<!\*)\*([^*\n]+?)\*(?!\*)", r"\1", text)  # *cursiva*
+    text = re.sub(r"`([^`\n]+?)`", r"\1", text)  # `code` inline
+    return text
+
+
 def split_message(text: str, limit: int = MAX_MESSAGE_LENGTH) -> list[str]:
     """Parte un texto en pedazos <= limit, cortando por párrafo/línea si se puede."""
     if len(text) <= limit:
@@ -255,7 +272,7 @@ class TelegramChannel:
         assert self._pool is not None and self._agent is not None
 
         # memoria COMPARTIDA con el CLI (decisión de Brian): sesión del dueño.
-        convo = Conversation(self._pool, self._agent, self._owner_session)
+        convo = Conversation(self._pool, self._agent, self._owner_session, channel="telegram")
         await context.bot.send_chat_action(chat_id=msg.chat_id, action=ChatAction.TYPING)
         try:
             # Nota: el provider es síncrono por dentro (bloquea el loop unos
@@ -270,7 +287,7 @@ class TelegramChannel:
             await msg.reply_text("❌ Algo falló procesando tu mensaje. Intenta de nuevo.")
             return
 
-        for chunk in split_message(resp.text):
+        for chunk in split_message(md_to_telegram(resp.text)):
             await msg.reply_text(chunk)
 
         # cupo: mensaje FIJADO arriba que se actualiza (decisión de Brian)
