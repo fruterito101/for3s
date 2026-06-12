@@ -37,6 +37,8 @@ class Settings:
     auth_mode: str  # "oauth" | "apikey"
     model: str
     database_url: str
+    telegram_bot_token: str = ""
+    owner_session: str = "brian"
 
     @property
     def is_oauth(self) -> bool:
@@ -64,6 +66,13 @@ def load_settings(env_path: Path | None = None) -> Settings:
 
     model = os.environ.get("FOR3S_MODEL", "claude-sonnet-4-6").strip()
     database_url = os.environ.get("DATABASE_URL", "").strip()
+    telegram_bot_token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+    owner_session = os.environ.get("FOR3S_OWNER_SESSION", "brian").strip()
     return Settings(
-        anthropic_token=token, auth_mode=auth_mode, model=model, database_url=database_url
+        anthropic_token=token,
+        auth_mode=auth_mode,
+        model=model,
+        database_url=database_url,
+        telegram_bot_token=telegram_bot_token,
+        owner_session=owner_session,
     )

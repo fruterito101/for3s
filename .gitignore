@@ -18,3 +18,5 @@ secrets/
 .DS_Store
 .idea/
 .vscode/
+# datos locales del canal (owner store)
+.for3s/
