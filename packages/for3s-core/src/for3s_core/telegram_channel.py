@@ -146,6 +146,10 @@ class TelegramChannel:
         self._pool = None
         self._agent: Agent | None = None
         self._cupo_msg_id: dict[int, int] = pin_store.load()  # persistido entre reinicios
+        self._last_cupo: tuple[float | None, float | None] = (
+            None,
+            None,
+        )  # último cupo visto (gratis)
 
     async def setup(self, app: Application) -> None:
         """post_init de PTB: conecta el cerebro (pool + provider)."""
@@ -190,6 +194,7 @@ class TelegramChannel:
           del chat como el aviso "fijó ..." → solo queda el pin de arriba.
         Robusto: cualquier fallo de Telegram no rompe la conversación.
         """
+        self._last_cupo = (usage_5h, usage_7d)
         text = format_cupo(usage_5h, usage_7d)
         if not text:
             return
@@ -227,15 +232,16 @@ class TelegramChannel:
         if not self._owners.is_authorized(user.id):
             await msg.reply_text("⛔ Este bot es privado.")
             return
-        assert self._agent is not None
-        try:
-            # llamada mínima solo para leer los headers de cupo actuales
-            resp = self._agent.ask_with_history([{"role": "user", "content": "ok"}], max_tokens=5)
-        except RateLimitExceeded as exc:
-            await msg.reply_text(f"⏳ {exc}")
-            return
-        cupo = format_cupo(resp.usage_5h, resp.usage_7d)
-        await msg.reply_text(cupo if cupo else "🔋 cupo no disponible ahora mismo.")
+        # NO llama a Claude (cero tokens): muestra el último cupo conocido, que
+        # vino GRATIS pegado a la última respuesta. Si aún no hay dato, lo dice.
+        usage_5h, usage_7d = self._last_cupo
+        cupo = format_cupo(usage_5h, usage_7d)
+        if cupo:
+            await msg.reply_text(cupo)
+        else:
+            await msg.reply_text(
+                "🔋 Aún no tengo dato de cupo — mándame un mensaje y te lo muestro."
+            )
 
     async def on_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         user = update.effective_user
