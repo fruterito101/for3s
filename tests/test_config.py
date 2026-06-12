@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from for3s_core.config import load_settings
 
 

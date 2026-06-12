@@ -36,6 +36,7 @@ from for3s_core.agent import Agent
 from for3s_core.config import load_settings
 from for3s_core.conversation import Conversation
 from for3s_core.llm import ClaudeProvider, RateLimitExceeded
+from for3s_core.pr_review import analizar_pr
 
 logger = logging.getLogger("for3s.telegram")
 
@@ -274,11 +275,25 @@ class TelegramChannel:
         # memoria COMPARTIDA con el CLI (decisión de Brian): sesión del dueño.
         convo = Conversation(self._pool, self._agent, self._owner_session, channel="telegram")
         await context.bot.send_chat_action(chat_id=msg.chat_id, action=ChatAction.TYPING)
+
+        # H4: ¿el mensaje trae un URL de PR? → enriquecer con contexto + QA.
+        prompt = msg.text
+        try:
+            enriched = await analizar_pr(self._pool, self._owner_session, msg.text)
+        except Exception:
+            logger.exception("error trayendo el PR")
+            enriched = None
+        if enriched is not None:
+            if enriched.startswith("__DIRECT__"):  # error legible del tool
+                await msg.reply_text(enriched.removeprefix("__DIRECT__"))
+                return
+            prompt = enriched  # el agente analizará el PR con formato QA
+
         try:
             # Nota: el provider es síncrono por dentro (bloquea el loop unos
             # segundos durante la llamada a Claude). Aceptable con 1 usuario;
             # R3 lo vuelve async (httpx.AsyncClient).
-            resp = await convo.send(msg.text)
+            resp = await convo.send(prompt, max_tokens=2048)
         except RateLimitExceeded as exc:
             await msg.reply_text(f"⏳ {exc}")
             return
