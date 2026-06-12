@@ -85,6 +85,30 @@ def format_cupo(usage_5h: float | None, usage_7d: float | None) -> str:
     return f"🔋 cupo 5h: {pct}% usado{extra}"
 
 
+class CupoPinStore:
+    """Recuerda, entre reinicios, qué mensaje de cupo está fijado por chat.
+
+    Sin esto, cada reinicio del bot crearía una burbuja de cupo nueva. Con
+    esto, el bot reusa el pin existente y SOLO lo edita → una sola burbuja
+    en toda la vida de la conversación.
+    """
+
+    def __init__(self, path: Path) -> None:
+        self._path = path
+
+    def load(self) -> dict[int, int]:
+        try:
+            raw = json.loads(self._path.read_text(encoding="utf-8"))
+            return {int(k): int(v) for k, v in raw.items()}
+        except (FileNotFoundError, ValueError, json.JSONDecodeError):
+            return {}
+
+    def save(self, data: dict[int, int]) -> None:
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        self._path.write_text(json.dumps({str(k): v for k, v in data.items()}), encoding="utf-8")
+        self._path.chmod(0o600)
+
+
 class OwnerStore:
     """Guarda quién es el dueño del bot (el primer /start). Fail-closed."""
 
@@ -113,11 +137,15 @@ class OwnerStore:
 class TelegramChannel:
     """La puerta de Telegram hacia el cerebro de For3s."""
 
-    def __init__(self, owner_store: OwnerStore, owner_session: str) -> None:
+    def __init__(
+        self, owner_store: OwnerStore, owner_session: str, pin_store: CupoPinStore
+    ) -> None:
         self._owners = owner_store
         self._owner_session = owner_session
+        self._pins = pin_store
         self._pool = None
         self._agent: Agent | None = None
+        self._cupo_msg_id: dict[int, int] = pin_store.load()  # persistido entre reinicios
 
     async def setup(self, app: Application) -> None:
         """post_init de PTB: conecta el cerebro (pool + provider)."""
@@ -153,6 +181,43 @@ class TelegramChannel:
             await update.message.reply_text("🦊 Hola de nuevo. Te escucho. (/cupo para tu cupo)")
         else:
             await update.message.reply_text("⛔ Este bot es privado.")
+
+    async def _update_cupo_pin(self, context, chat_id, usage_5h, usage_7d) -> None:
+        """Mantiene SOLO el mensaje fijado de arriba con el cupo, sin ruido.
+
+        - Si ya existe: lo EDITA (cero burbujas nuevas, cero avisos).
+        - Si no existe: lo crea, lo fija en silencio, y borra tanto la burbuja
+          del chat como el aviso "fijó ..." → solo queda el pin de arriba.
+        Robusto: cualquier fallo de Telegram no rompe la conversación.
+        """
+        text = format_cupo(usage_5h, usage_7d)
+        if not text:
+            return
+        existing = self._cupo_msg_id.get(chat_id)
+        if existing is not None:
+            try:
+                await context.bot.edit_message_text(text, chat_id=chat_id, message_id=existing)
+                return
+            except Exception:
+                self._cupo_msg_id.pop(chat_id, None)
+        try:
+            sent = await context.bot.send_message(chat_id=chat_id, text=text)
+            self._cupo_msg_id[chat_id] = sent.message_id
+            self._pins.save(self._cupo_msg_id)
+            # fijar en silencio (genera un service message "fijó ...")
+            await context.bot.pin_chat_message(
+                chat_id=chat_id, message_id=sent.message_id, disable_notification=True
+            )
+            # borrar SOLO el aviso de sistema "For3s OS fijó ..." (service msg,
+            # suele ser message_id+1). La burbuja del cupo NO se borra: si se
+            # borrara, el pin se iría con ella. Pero solo se crea UNA vez por
+            # chat — en adelante se EDITA (sin nuevas burbujas ni avisos).
+            try:
+                await context.bot.delete_message(chat_id=chat_id, message_id=sent.message_id + 1)
+            except Exception:
+                pass
+        except Exception:
+            logger.warning("no se pudo fijar el mensaje de cupo (no crítico)")
 
     async def on_cupo(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         msg = update.message
@@ -202,10 +267,8 @@ class TelegramChannel:
         for chunk in split_message(resp.text):
             await msg.reply_text(chunk)
 
-        # pie de cupo / alerta al 80% (decisión de Brian)
-        cupo = format_cupo(resp.usage_5h, resp.usage_7d)
-        if cupo:
-            await msg.reply_text(cupo)
+        # cupo: mensaje FIJADO arriba que se actualiza (decisión de Brian)
+        await self._update_cupo_pin(context, msg.chat_id, resp.usage_5h, resp.usage_7d)
 
 
 def main() -> int:
@@ -216,7 +279,8 @@ def main() -> int:
         return 1
 
     store = OwnerStore(Path.cwd() / ".for3s" / "telegram_owner.json")
-    channel = TelegramChannel(store, settings.owner_session)
+    pin_store = CupoPinStore(Path.cwd() / ".for3s" / "telegram_cupo_pin.json")
+    channel = TelegramChannel(store, settings.owner_session, pin_store)
 
     app = (
         Application.builder()
