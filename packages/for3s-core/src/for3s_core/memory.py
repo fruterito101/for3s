@@ -44,8 +44,14 @@ async def record_turn(
     tokens_in: int = 0,
     tokens_out: int = 0,
     model: str | None = None,
+    channel: str = "cli",
 ) -> int:
-    """Guarda un turno como evento append-only. Devuelve su seq."""
+    """Guarda un turno como evento append-only. Devuelve su seq.
+
+    channel: por qué puerta entró este turno ('cli' | 'telegram'). Se guarda
+    POR TURNO (no por sesión) — CLI y Telegram comparten la sesión "brian"
+    (memoria unificada), pero cada mensaje recuerda su origen para trazabilidad.
+    """
     async with pool.acquire() as conn:
         async with conn.transaction():
             next_seq = await conn.fetchval(
@@ -55,8 +61,8 @@ async def record_turn(
             await conn.execute(
                 """
                 INSERT INTO episodes_events
-                    (session_id, seq, role, content, tokens_in, tokens_out, model)
-                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                    (session_id, seq, role, content, tokens_in, tokens_out, model, channel)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                 """,
                 session_id,
                 next_seq,
@@ -65,6 +71,7 @@ async def record_turn(
                 tokens_in,
                 tokens_out,
                 model,
+                channel,
             )
     return next_seq
 

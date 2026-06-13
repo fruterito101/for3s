@@ -56,7 +56,9 @@ class Conversation:
         await memory.ensure_session(self._pool, self._session_id, channel=self._channel)
 
         # 1) guardar SOLO el mensaje original (corto) + audit
-        await memory.record_turn(self._pool, self._session_id, role="user", content=message)
+        await memory.record_turn(
+            self._pool, self._session_id, role="user", content=message, channel=self._channel
+        )
         await audit.append(
             self._pool,
             actor="user",
@@ -86,6 +88,7 @@ class Conversation:
             tokens_in=resp.input_tokens,
             tokens_out=resp.output_tokens,
             model=resp.model,
+            channel=self._channel,
         )
         await audit.append(
             self._pool,
