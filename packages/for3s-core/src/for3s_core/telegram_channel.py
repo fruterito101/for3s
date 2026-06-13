@@ -187,6 +187,17 @@ class TelegramChannel:
         logger.info("cerebro conectado (modelo=%s auth=%s)", settings.model, settings.auth_mode)
 
     async def teardown(self, app: Application) -> None:
+        """post_shutdown de PTB: cierra el pool de BD ordenadamente.
+
+        Esto SÍ se await-ea bien en el shutdown (verificado: sin errores de
+        pool al apagar). Nota: al recibir SIGTERM verás en los logs
+        "RuntimeWarning: coroutine 'Updater.stop' was never awaited" — es un
+        warning COSMÉTICO interno de python-telegram-bot 22.x: en la carrera
+        de la señal, PTB evalúa self.updater.running y la corrutina stop()
+        queda sin await. NO es bug nuestro; el apagado es correcto (pool y
+        application se cierran). Decisión (Brian, 2026-06-13): dejarlo, no
+        vale la pena un shutdown manual solo por cosmética.
+        """
         if self._pool is not None:
             await self._pool.close()
 
