@@ -69,11 +69,30 @@ async def record_turn(
     return next_seq
 
 
-async def load_history(pool: asyncpg.Pool, session_id: str) -> list[Turn]:
-    """Reconstruye el historial COMPLETO de la sesión en orden cronológico."""
-    async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            "SELECT role, content FROM episodes_events WHERE session_id = $1 ORDER BY seq ASC",
-            session_id,
-        )
+async def load_history(
+    pool: asyncpg.Pool, session_id: str, *, last_n: int | None = None
+) -> list[Turn]:
+    """Reconstruye el historial de la sesión en orden cronológico.
+
+    last_n: si se da, devuelve solo los ÚLTIMOS n turnos (en orden). Esencial
+    para NO re-mandar todo el historial a Claude cada vez — sesiones largas
+    (ej. 34 turnos / 96k chars) hacían que Claude tardara minutos y el bot se
+    colgara. El truncado/resumen inteligente completo es R3/H5; esto es el
+    tope simple de robustez.
+    """
+    if last_n is not None:
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT role, content FROM episodes_events WHERE session_id = $1 "
+                "ORDER BY seq DESC LIMIT $2",
+                session_id,
+                last_n,
+            )
+        rows = list(reversed(rows))  # volver a orden cronológico
+    else:
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT role, content FROM episodes_events WHERE session_id = $1 ORDER BY seq ASC",
+                session_id,
+            )
     return [Turn(role=r["role"], content=r["content"]) for r in rows]

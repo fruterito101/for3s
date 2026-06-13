@@ -22,6 +22,10 @@ from for3s_core.github_tool import (
 )
 from for3s_core.secret_store import SecretStore
 
+# Cap del contexto a Claude: analizable en <1 min (un PR de 63k chars colgaba
+# el bot). El análisis por lotes/multi-agente completo llega en H8 (R5).
+MAX_CONTEXT_CHARS = 25_000
+
 # Plantilla del REPORTE QA ESTRUCTURADO (la "cara" del producto — semilla R7 QA Pack).
 QA_INSTRUCTIONS = """Eres For3s OS en modo QA. Analiza el siguiente código y entrega un
 REPORTE estructurado EXACTAMENTE con este formato (en español, conciso):
@@ -95,5 +99,18 @@ async def analizar_pr(pool: asyncpg.Pool, workspace_id: str, text: str) -> str |
 
     await audit.append(pool, actor="for3s", action="gh_fetched", detail=audit_detail)
 
+    # CAP de contexto: un PR enorme (ej. 63k chars) hace que Claude tarde
+    # minutos y el bot se atasque (bug del PR #134). Acotamos a un tamaño
+    # analizable en <1 min y avisamos lo que se recortó. El análisis por
+    # lotes/multi-agente completo es H8 (R5); esto es la versión simple.
+    aviso = ""
+    if len(context) > MAX_CONTEXT_CHARS:
+        context = context[:MAX_CONTEXT_CHARS]
+        aviso = (
+            "\n\n⚠️ NOTA: este código es muy grande; analicé solo la primera "
+            "parte. Para un análisis completo, pásame archivos/secciones "
+            "específicas. Decláralo en el reporte."
+        )
+
     lint = _lint_block(archivos)
-    return f"{QA_INSTRUCTIONS}\n\n{context}{lint}"
+    return f"{QA_INSTRUCTIONS}\n\n{context}{lint}{aviso}"

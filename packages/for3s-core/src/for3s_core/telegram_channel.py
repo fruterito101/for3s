@@ -285,7 +285,9 @@ class TelegramChannel:
         # TODO con TIMEOUT: si tarda demasiado (PR enorme, red lenta) cortamos
         # y avisamos, en vez de quedar congelados en silencio (bug encontrado
         # por Brian con el PR #134). asyncio.wait_for garantiza recuperación.
-        prompt = msg.text
+        # prompt enriquecido (lo que se manda a Claude) ≠ msg.text (lo que se
+        # guarda en memoria). Así un PR de 100k chars NO se guarda como turno.
+        prompt = None
         try:
             enriched = await asyncio.wait_for(
                 analizar_pr(self._pool, self._owner_session, msg.text),
@@ -304,13 +306,14 @@ class TelegramChannel:
             if enriched.startswith("__DIRECT__"):  # error legible del tool
                 await msg.reply_text(enriched.removeprefix("__DIRECT__"))
                 return
-            prompt = enriched  # el agente analizará con formato QA
+            prompt = enriched  # solo para Claude; en memoria queda msg.text
 
         try:
-            # Nota: el provider es síncrono por dentro. wait_for evita que un
-            # análisis largo congele al bot para siempre (R3 lo hará async).
+            # Nota: el provider es síncrono por dentro. wait_for + to_thread
+            # evitan que un análisis largo congele al bot (R3 lo hará async).
             resp = await asyncio.wait_for(
-                convo.send(prompt, max_tokens=2048), timeout=ANALYSIS_TIMEOUT
+                convo.send(msg.text, max_tokens=2048, prompt=prompt),
+                timeout=ANALYSIS_TIMEOUT,
             )
         except TimeoutError:
             await msg.reply_text(
