@@ -19,11 +19,18 @@ API = "https://api.github.com"
 PR_URL_RE = re.compile(
     r"https?://github\.com/(?P<owner>[\w.\-]+)/(?P<repo>[\w.\-]+)/pull/(?P<number>\d+)"
 )
+# Gist: gist.github.com/usuario/<id>  o  gist.github.com/<id>
+GIST_URL_RE = re.compile(r"https?://gist\.github\.com/(?:[\w.\-]+/)?(?P<gist_id>[0-9a-f]+)")
+# Archivo suelto: github.com/owner/repo/blob/<ref>/<path>
+BLOB_URL_RE = re.compile(
+    r"https?://github\.com/(?P<owner>[\w.\-]+)/(?P<repo>[\w.\-]+)/blob/(?P<ref>[\w.\-/]+?)/(?P<path>[\w./\-]+)"
+)
 
 # Límites de truncado (producto: no reventar el contexto de Claude)
 MAX_FILES = 30
 MAX_PATCH_CHARS_PER_FILE = 6_000
 MAX_TOTAL_PATCH_CHARS = 60_000
+MAX_FILE_CHARS = 40_000  # para gists/archivos sueltos
 
 
 class GitHubToolError(Exception):
@@ -89,8 +96,38 @@ def parse_pr_url(text: str) -> tuple[str, str, int] | None:
     return m.group("owner"), m.group("repo"), int(m.group("number"))
 
 
+@dataclass
+class CodeSnippet:
+    """Código suelto traído de un gist o archivo (no es un PR)."""
+
+    source: str  # descripción legible de dónde vino
+    files: dict[str, str]  # {nombre: contenido}
+
+
+def detect_resource(text: str) -> tuple[str, tuple]:
+    """Detecta qué recurso de GitHub trae el texto. (tipo, datos).
+
+    tipo ∈ {"pr", "gist", "blob", "none"}. PR y blob antes que gist.
+    """
+    pr = PR_URL_RE.search(text)
+    if pr:
+        return "pr", (pr.group("owner"), pr.group("repo"), int(pr.group("number")))
+    blob = BLOB_URL_RE.search(text)
+    if blob:
+        return "blob", (
+            blob.group("owner"),
+            blob.group("repo"),
+            blob.group("ref"),
+            blob.group("path"),
+        )
+    gist = GIST_URL_RE.search(text)
+    if gist:
+        return "gist", (gist.group("gist_id"),)
+    return "none", ()
+
+
 class GitHubTool:
-    """Cliente de solo-lectura de PRs. El token llega ya descifrado (KEK)."""
+    """Cliente de solo-lectura de PRs/gists/archivos. Token descifrado (KEK)."""
 
     def __init__(self, token: str | None = None, timeout: float = 30.0) -> None:
         self._token = token
@@ -107,12 +144,18 @@ class GitHubTool:
         return h
 
     def _get(self, path: str, params: dict | None = None) -> httpx.Response:
-        resp = httpx.get(
-            f"{API}{path}", headers=self._headers(), params=params, timeout=self._timeout
-        )
+        # errores de red/timeout → mensaje legible (no traceback)
+        try:
+            resp = httpx.get(
+                f"{API}{path}", headers=self._headers(), params=params, timeout=self._timeout
+            )
+        except httpx.HTTPError as exc:
+            raise GitHubToolError(
+                "No pude conectarme a GitHub ahora mismo. Revisa tu conexión o intenta de nuevo."
+            ) from exc
         if resp.status_code == 404:
             raise GitHubToolError(
-                "No encontré ese PR. Verifica el URL, o si el repo es privado "
+                "No encontré ese recurso. Verifica el URL, o si es privado "
                 "puede que mi token no tenga acceso."
             )
         if resp.status_code in (401, 403):
@@ -122,9 +165,15 @@ class GitHubTool:
                     "GitHub me puso límite de peticiones por ahora. Intenta en unos minutos."
                 )
             raise GitHubToolError(
-                "GitHub me negó el acceso (token inválido o sin permisos para ese repo)."
+                "GitHub me negó el acceso (token inválido o sin permisos para ese recurso)."
             )
-        resp.raise_for_status()
+        if resp.status_code >= 500:
+            raise GitHubToolError(
+                f"GitHub tuvo un problema temporal (error {resp.status_code}). "
+                "Intenta de nuevo en unos segundos."
+            )
+        if resp.status_code >= 400:
+            raise GitHubToolError(f"GitHub respondió con error {resp.status_code}.")
         return resp
 
     def fetch_pr(self, owner: str, repo: str, number: int) -> PullRequest:
@@ -185,6 +234,42 @@ class GitHubTool:
                 )
             )
         return pr
+
+    def fetch_gist(self, gist_id: str) -> CodeSnippet:
+        """Trae un gist (puede tener varios archivos)."""
+        data = self._get(f"/gists/{gist_id}").json()
+        files = {}
+        for name, info in (data.get("files") or {}).items():
+            files[name] = (info.get("content") or "")[:MAX_FILE_CHARS]
+        desc = data.get("description") or "(sin descripción)"
+        owner = (data.get("owner") or {}).get("login", "?")
+        return CodeSnippet(source=f"Gist de {owner}: {desc}", files=files)
+
+    def fetch_file(self, owner: str, repo: str, ref: str, path: str) -> CodeSnippet:
+        """Trae un archivo suelto de un repo (github.com/.../blob/ref/path)."""
+        import base64
+
+        data = self._get(
+            f"/repos/{owner}/{repo}/contents/{path}", params={"ref": ref}
+        ).json()
+        try:
+            content = base64.b64decode(data.get("content", "")).decode(
+                "utf-8", errors="replace"
+            )
+        except Exception:
+            content = "(no se pudo decodificar — ¿binario?)"
+        return CodeSnippet(
+            source=f"Archivo {owner}/{repo}/{path} @ {ref}",
+            files={path.split("/")[-1]: content[:MAX_FILE_CHARS]},
+        )
+
+
+def snippet_to_context(snip: CodeSnippet) -> str:
+    """Convierte un gist/archivo a texto-contexto para el análisis QA."""
+    parts = [f"FUENTE: {snip.source}"]
+    for name, body in snip.files.items():
+        parts.append(f"\n--- {name} ---\n{body}")
+    return "\n".join(parts)
 
 
 def pr_to_context(pr: PullRequest) -> str:

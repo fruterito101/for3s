@@ -132,3 +132,42 @@ def test_patch_to_source_extrae_lineas_anadidas() -> None:
     src = f.patch_to_source()
     assert "nueva linea" in src
     assert "vieja" not in src
+
+
+# ---- detección multi-tipo (PR / gist / blob) ----
+
+
+def test_detect_pr() -> None:
+    from for3s_core.github_tool import detect_resource
+
+    t, d = detect_resource("mira https://github.com/o/r/pull/42")
+    assert t == "pr" and d == ("o", "r", 42)
+
+
+def test_detect_gist() -> None:
+    from for3s_core.github_tool import detect_resource
+
+    t, d = detect_resource("https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f")
+    assert t == "gist" and d == ("442a6bf555914893e9891c11519de94f",)
+
+
+def test_detect_blob() -> None:
+    from for3s_core.github_tool import detect_resource
+
+    t, d = detect_resource("https://github.com/o/r/blob/main/src/app.py")
+    assert t == "blob" and d == ("o", "r", "main", "src/app.py")
+
+
+def test_detect_none() -> None:
+    from for3s_core.github_tool import detect_resource
+
+    t, d = detect_resource("hola cómo estás")
+    assert t == "none"
+
+
+def test_snippet_to_context() -> None:
+    from for3s_core.github_tool import CodeSnippet, snippet_to_context
+
+    s = CodeSnippet(source="Gist de x", files={"a.py": "print(1)"})
+    ctx = snippet_to_context(s)
+    assert "Gist de x" in ctx and "print(1)" in ctx and "a.py" in ctx
