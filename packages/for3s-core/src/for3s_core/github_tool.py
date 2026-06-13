@@ -19,6 +19,10 @@ API = "https://api.github.com"
 PR_URL_RE = re.compile(
     r"https?://github\.com/(?P<owner>[\w.\-]+)/(?P<repo>[\w.\-]+)/pull/(?P<number>\d+)"
 )
+# Issue: github.com/owner/repo/issues/<n>  (ruta distinta a /pull/)
+ISSUE_URL_RE = re.compile(
+    r"https?://github\.com/(?P<owner>[\w.\-]+)/(?P<repo>[\w.\-]+)/issues/(?P<number>\d+)"
+)
 # Gist: gist.github.com/usuario/<id>  o  gist.github.com/<id>
 GIST_URL_RE = re.compile(r"https?://gist\.github\.com/(?:[\w.\-]+/)?(?P<gist_id>[0-9a-f]+)")
 # Archivo suelto: github.com/owner/repo/blob/<ref>/<path>
@@ -104,14 +108,46 @@ class CodeSnippet:
     files: dict[str, str]  # {nombre: contenido}
 
 
+@dataclass
+class IssueComment:
+    author: str
+    body: str
+
+
+@dataclass
+class Issue:
+    """Un issue de GitHub: título, descripción y comentarios (no tiene diff)."""
+
+    owner: str
+    repo: str
+    number: int
+    title: str
+    body: str
+    author: str
+    state: str  # open | closed
+    labels: list[str] = field(default_factory=list)
+    comments: list[IssueComment] = field(default_factory=list)
+
+    @property
+    def url(self) -> str:
+        return f"https://github.com/{self.owner}/{self.repo}/issues/{self.number}"
+
+
 def detect_resource(text: str) -> tuple[str, tuple]:
     """Detecta qué recurso de GitHub trae el texto. (tipo, datos).
 
-    tipo ∈ {"pr", "gist", "blob", "none"}. PR y blob antes que gist.
+    tipo ∈ {"pr", "issue", "gist", "blob", "none"}. PR/issue/blob antes que gist.
     """
     pr = PR_URL_RE.search(text)
     if pr:
         return "pr", (pr.group("owner"), pr.group("repo"), int(pr.group("number")))
+    issue = ISSUE_URL_RE.search(text)
+    if issue:
+        return "issue", (
+            issue.group("owner"),
+            issue.group("repo"),
+            int(issue.group("number")),
+        )
     blob = BLOB_URL_RE.search(text)
     if blob:
         return "blob", (
@@ -235,6 +271,42 @@ class GitHubTool:
             )
         return pr
 
+    def fetch_issue(self, owner: str, repo: str, number: int) -> Issue:
+        """Trae un issue: título, descripción, labels y comentarios (cap 20)."""
+        meta = self._get(f"/repos/{owner}/{repo}/issues/{number}").json()
+        # /issues/N también responde para PRs; si es un PR, redirigir mejor.
+        if meta.get("pull_request"):
+            raise GitHubToolError(
+                "Ese número es un Pull Request, no un issue. Pásame el URL con /pull/."
+            )
+        labels = [
+            (lb.get("name") if isinstance(lb, dict) else str(lb))
+            for lb in (meta.get("labels") or [])
+        ]
+        issue = Issue(
+            owner=owner,
+            repo=repo,
+            number=number,
+            title=meta.get("title") or "",
+            body=(meta.get("body") or "")[:6000],
+            author=(meta.get("user") or {}).get("login", "?"),
+            state=meta.get("state", "?"),
+            labels=[lb for lb in labels if lb],
+        )
+        if meta.get("comments"):
+            raw = self._get(
+                f"/repos/{owner}/{repo}/issues/{number}/comments",
+                params={"per_page": 20},
+            ).json()
+            for c in raw[:20]:
+                issue.comments.append(
+                    IssueComment(
+                        author=(c.get("user") or {}).get("login", "?"),
+                        body=(c.get("body") or "")[:2000],
+                    )
+                )
+        return issue
+
     def fetch_gist(self, gist_id: str) -> CodeSnippet:
         """Trae un gist (puede tener varios archivos)."""
         data = self._get(f"/gists/{gist_id}").json()
@@ -265,6 +337,22 @@ def snippet_to_context(snip: CodeSnippet) -> str:
     parts = [f"FUENTE: {snip.source}"]
     for name, body in snip.files.items():
         parts.append(f"\n--- {name} ---\n{body}")
+    return "\n".join(parts)
+
+
+def issue_to_context(issue: Issue) -> str:
+    """Convierte un issue a texto-contexto para que For3s lo analice."""
+    parts = [
+        f"ISSUE: {issue.url}",
+        f"Título: {issue.title}",
+        f"Autor: {issue.author} · Estado: {issue.state}",
+    ]
+    if issue.labels:
+        parts.append(f"Labels: {', '.join(issue.labels)}")
+    if issue.body:
+        parts.append(f"\nDescripción:\n{issue.body}")
+    for c in issue.comments:
+        parts.append(f"\n--- Comentario de {c.author} ---\n{c.body}")
     return "\n".join(parts)
 
 

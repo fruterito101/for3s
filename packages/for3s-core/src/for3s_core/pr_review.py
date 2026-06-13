@@ -17,6 +17,7 @@ from for3s_core.github_tool import (
     GitHubTool,
     GitHubToolError,
     detect_resource,
+    issue_to_context,
     pr_to_context,
     snippet_to_context,
 )
@@ -46,6 +47,29 @@ REPORTE estructurado EXACTAMENTE con este formato (en español, conciso):
 (uno de: ✅ APROBAR · 🔁 REVISAR (con cambios) · ⛔ RECHAZAR — y por qué en 1 línea)
 
 Sé directo y específico. Cita archivos/líneas cuando puedas."""
+
+# Un issue NO es código: no se lintea ni se da veredicto APROBAR/RECHAZAR.
+# Se hace TRIAGE: entender el problema y proponer un plan de acción.
+ISSUE_INSTRUCTIONS = """Eres For3s OS en modo QA. Analiza el siguiente ISSUE de GitHub y
+entrega un TRIAGE estructurado EXACTAMENTE con este formato (en español, conciso):
+
+📋 RESUMEN
+(2-3 líneas: cuál es el problema o petición que reporta el issue)
+
+🔍 TIPO
+(uno de: 🐛 bug · ✨ feature · ❓ duda · 📄 docs · 🔧 mantenimiento)
+
+🎯 SEVERIDAD
+(uno de: 🔴 alta · 🟡 media · 🟢 baja — y por qué en 1 línea)
+
+🧩 INFO QUE FALTA
+(qué datos harían falta para resolverlo: pasos de reproducción, versión, logs.
+Si está completo, escribe "nada — está bien documentado")
+
+🛠️ PLAN SUGERIDO
+(2-4 pasos concretos para abordarlo)
+
+Sé directo y específico."""
 
 
 def _lint_block(archivos: dict[str, str]) -> str:
@@ -79,6 +103,12 @@ async def analizar_pr(pool: asyncpg.Pool, workspace_id: str, text: str) -> str |
             archivos = {f.filename: f.patch_to_source() for f in pr.files}
             context = pr_to_context(pr)
             audit_detail = {"tipo": "pr", "owner": owner, "repo": repo, "number": number}
+        elif tipo == "issue":
+            owner, repo, number = datos
+            issue = tool.fetch_issue(owner, repo, number)
+            archivos = {}  # un issue no es código → no se lintea
+            context = issue_to_context(issue)
+            audit_detail = {"tipo": "issue", "owner": owner, "repo": repo, "number": number}
         elif tipo == "gist":
             (gist_id,) = datos
             snip = tool.fetch_gist(gist_id)
@@ -111,6 +141,10 @@ async def analizar_pr(pool: asyncpg.Pool, workspace_id: str, text: str) -> str |
             "parte. Para un análisis completo, pásame archivos/secciones "
             "específicas. Decláralo en el reporte."
         )
+
+    # Un issue se analiza como TRIAGE (no como código): sin lint, otra plantilla.
+    if tipo == "issue":
+        return f"{ISSUE_INSTRUCTIONS}\n\n{context}{aviso}"
 
     lint = _lint_block(archivos)
     return f"{QA_INSTRUCTIONS}\n\n{context}{lint}{aviso}"
