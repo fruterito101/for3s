@@ -25,6 +25,14 @@ ISSUE_URL_RE = re.compile(
 )
 # Gist: gist.github.com/usuario/<id>  o  gist.github.com/<id>
 GIST_URL_RE = re.compile(r"https?://gist\.github\.com/(?:[\w.\-]+/)?(?P<gist_id>[0-9a-f]+)")
+
+# Referencia CORTA (sin URL): "PR 134", "pull request 134", "PR #134",
+# "issue 13", "issue #13". CONSERVADOR a propósito: exige la palabra clave
+# (pr/pull request/issue) PEGADA al número, para no confundir un número
+# cualquiera ("dame 3 ideas", "tengo 134 pesos") con un recurso de GitHub.
+# El repo (owner/repo) NO viene aquí — se resuelve con el "último repo visto".
+SHORT_PR_RE = re.compile(r"\b(?:pull\s*request|pr)\s*#?\s*(?P<number>\d+)\b", re.IGNORECASE)
+SHORT_ISSUE_RE = re.compile(r"\bissue\s*#?\s*(?P<number>\d+)\b", re.IGNORECASE)
 # Archivo suelto: github.com/owner/repo/blob/<ref>/<path>
 BLOB_URL_RE = re.compile(
     r"https?://github\.com/(?P<owner>[\w.\-]+)/(?P<repo>[\w.\-]+)/blob/(?P<ref>[\w.\-/]+?)/(?P<path>[\w./\-]+)"
@@ -160,6 +168,22 @@ def detect_resource(text: str) -> tuple[str, tuple]:
     if gist:
         return "gist", (gist.group("gist_id"),)
     return "none", ()
+
+
+def detect_short_ref(text: str) -> tuple[str, int] | None:
+    """Detecta una referencia CORTA a un PR/issue (sin URL): ("pr"|"issue", n).
+
+    Solo activa con palabra clave + número ("PR 134", "issue #13") — NO con un
+    número suelto. Devuelve None si no hay referencia clara. El repo se resuelve
+    aparte (último repo visto en la sesión). PR tiene prioridad sobre issue.
+    """
+    pr = SHORT_PR_RE.search(text)
+    if pr:
+        return "pr", int(pr.group("number"))
+    issue = SHORT_ISSUE_RE.search(text)
+    if issue:
+        return "issue", int(issue.group("number"))
+    return None
 
 
 class GitHubTool:

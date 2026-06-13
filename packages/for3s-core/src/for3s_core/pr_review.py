@@ -12,11 +12,12 @@ from __future__ import annotations
 
 import asyncpg
 
-from for3s_core import audit, sandbox
+from for3s_core import audit, memory, sandbox
 from for3s_core.github_tool import (
     GitHubTool,
     GitHubToolError,
     detect_resource,
+    detect_short_ref,
     issue_to_context,
     pr_to_context,
     snippet_to_context,
@@ -89,8 +90,35 @@ async def analizar_pr(pool: asyncpg.Pool, workspace_id: str, text: str) -> str |
     Si no hay recurso, devuelve None (sigue su flujo normal de chat).
     """
     tipo, datos = detect_resource(text)
+
+    # Aviso a declarar en el reporte cuando el repo se resolvió por contexto
+    # (referencia corta "el PR 134" sin URL). Vacío si vino el URL completo.
+    aviso_repo = ""
+
     if tipo == "none":
-        return None
+        # ¿Referencia CORTA ("PR 134", "issue #13") sin URL? Resolverla con el
+        # último repo visto en la sesión (Bug F). workspace_id ES el session_id
+        # en este setup single-user ("brian").
+        ref = detect_short_ref(text)
+        if ref is None:
+            return None  # ni URL ni referencia corta → chat normal
+        ref_tipo, ref_num = ref
+        last = await memory.get_last_repo(pool, workspace_id)
+        if last is None:
+            que = "PR" if ref_tipo == "pr" else "issue"
+            return (
+                f"__DIRECT__📍 Aún no sé de qué repositorio hablas. Pásame el URL "
+                f"completo del {que} una vez (ej. https://github.com/owner/repo/...) "
+                f"y después podré entender referencias cortas como “el {que} {ref_num}”."
+            )
+        owner, repo = last
+        tipo = ref_tipo
+        datos = (owner, repo, ref_num)
+        aviso_repo = (
+            f"\n\n📍 NOTA: usé el repositorio {owner}/{repo} (el último que "
+            "analizamos). Si te referías a otro, pásame el URL completo. "
+            "Decláralo al inicio del reporte."
+        )
 
     store = SecretStore(pool)
     gh_token = await store.get_secret(workspace_id, "github_token")
@@ -129,6 +157,11 @@ async def analizar_pr(pool: asyncpg.Pool, workspace_id: str, text: str) -> str |
 
     await audit.append(pool, actor="for3s", action="gh_fetched", detail=audit_detail)
 
+    # Recordar el repo visto (Bug F): habilita referencias cortas futuras
+    # ("el PR 134") sin URL. Solo para recursos con owner/repo (no gists).
+    if tipo in ("pr", "issue", "blob"):
+        await memory.set_last_repo(pool, workspace_id, audit_detail["owner"], audit_detail["repo"])
+
     # CAP de contexto: un PR enorme (ej. 63k chars) hace que Claude tarde
     # minutos y el bot se atasque (bug del PR #134). Acotamos a un tamaño
     # analizable en <1 min y avisamos lo que se recortó. El análisis por
@@ -144,7 +177,7 @@ async def analizar_pr(pool: asyncpg.Pool, workspace_id: str, text: str) -> str |
 
     # Un issue se analiza como TRIAGE (no como código): sin lint, otra plantilla.
     if tipo == "issue":
-        return f"{ISSUE_INSTRUCTIONS}\n\n{context}{aviso}"
+        return f"{ISSUE_INSTRUCTIONS}\n\n{context}{aviso}{aviso_repo}"
 
     lint = _lint_block(archivos)
-    return f"{QA_INSTRUCTIONS}\n\n{context}{lint}{aviso}"
+    return f"{QA_INSTRUCTIONS}\n\n{context}{lint}{aviso}{aviso_repo}"

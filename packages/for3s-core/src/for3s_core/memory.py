@@ -9,6 +9,7 @@ leyendo esos eventos en orden → For3s "recuerda" entre reinicios.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 
 import asyncpg
@@ -103,3 +104,33 @@ async def load_history(
                 session_id,
             )
     return [Turn(role=r["role"], content=r["content"]) for r in rows]
+
+
+async def set_last_repo(pool: asyncpg.Pool, session_id: str, owner: str, repo: str) -> None:
+    """Recuerda el último owner/repo de GitHub visto en la sesión (sessions.meta).
+
+    Permite resolver referencias cortas como "el PR 134" sin URL completo.
+    Se guarda en sessions.meta (JSONB) bajo la clave 'last_repo'.
+    """
+    await ensure_session(pool, session_id)
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE sessions SET meta = jsonb_set(meta, '{last_repo}', $2::jsonb) WHERE id = $1",
+            session_id,
+            json.dumps({"owner": owner, "repo": repo}),
+        )
+
+
+async def get_last_repo(pool: asyncpg.Pool, session_id: str) -> tuple[str, str] | None:
+    """Devuelve (owner, repo) del último repo visto en la sesión, o None."""
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT meta -> 'last_repo' AS lr FROM sessions WHERE id = $1", session_id
+        )
+    if not row or row["lr"] is None:
+        return None
+    lr = row["lr"]
+    if isinstance(lr, str):  # asyncpg puede devolver JSONB como str
+        lr = json.loads(lr)
+    owner, repo = lr.get("owner"), lr.get("repo")
+    return (owner, repo) if owner and repo else None
