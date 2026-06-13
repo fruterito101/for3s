@@ -38,6 +38,7 @@ from for3s_core.config import load_settings
 from for3s_core.conversation import Conversation
 from for3s_core.llm import ClaudeProvider, RateLimitExceeded
 from for3s_core.pr_review import analizar_pr
+from for3s_core.secret_store import SecretStore
 
 logger = logging.getLogger("for3s.telegram")
 
@@ -336,11 +337,50 @@ class TelegramChannel:
         await self._update_cupo_pin(context, msg.chat_id, resp.usage_5h, resp.usage_7d)
 
 
+def _resolver_token_telegram(settings) -> str:
+    """Resuelve el token de Telegram, priorizando el SecretStore CIFRADO.
+
+    Orden:
+      1. SecretStore (Postgres, AES-256-GCM + KEK) — la fuente segura.
+      2. Fallback al .env (TELEGRAM_BOT_TOKEN) — primer arranque / migración.
+
+    Así el token vive cifrado en reposo; el .env solo guarda el mínimo (y se
+    puede vaciar tras migrar). Si la BD no responde, el .env evita un caído.
+    """
+
+    async def _leer_de_bd() -> str | None:
+        try:
+            pool = await db.connect(settings.database_url)
+        except Exception as exc:  # BD no disponible → caemos al .env
+            logger.warning("No pude conectar a la BD para el token de Telegram: %s", exc)
+            return None
+        try:
+            return await SecretStore(pool).get_secret(settings.owner_session, "telegram_bot_token")
+        finally:
+            await pool.close()
+
+    cifrado = asyncio.run(_leer_de_bd())
+    if cifrado:
+        logger.info("token de Telegram cargado desde SecretStore cifrado")
+        return cifrado
+    if settings.telegram_bot_token:
+        logger.info("token de Telegram cargado desde .env (fallback)")
+        return settings.telegram_bot_token
+    return ""
+
+
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
+    # SEGURIDAD: httpx loguea cada URL en INFO, y el token de Telegram va EN la
+    # URL (api.telegram.org/bot<TOKEN>/...). En INFO eso filtra el token a los
+    # logs en texto plano (miles de líneas). Lo subimos a WARNING: deja de
+    # loguear cada request (0 fuga de token) pero seguimos viendo errores reales.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
     settings = load_settings()
-    if not settings.telegram_bot_token:
-        print("Falta TELEGRAM_BOT_TOKEN en el .env")
+
+    token = _resolver_token_telegram(settings)
+    if not token:
+        print("Falta el token de Telegram (ni en SecretStore cifrado ni en .env)")
         return 1
 
     store = OwnerStore(Path.cwd() / ".for3s" / "telegram_owner.json")
@@ -349,7 +389,7 @@ def main() -> int:
 
     app = (
         Application.builder()
-        .token(settings.telegram_bot_token)
+        .token(token)
         .post_init(channel.setup)
         .post_shutdown(channel.teardown)
         .build()
