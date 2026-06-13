@@ -17,6 +17,7 @@ suscripción usado; a partir del 80% alerta visible; /cupo lo consulta.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from pathlib import Path
@@ -45,6 +46,10 @@ MAX_MESSAGE_LENGTH = 4096
 
 # A partir de este % de cupo usado (suscripción, ventana 5h) → alerta visible.
 ALERT_THRESHOLD = 0.80
+
+# Timeouts (segundos) para no quedar congelados en operaciones largas.
+GITHUB_TIMEOUT = 60  # traer el recurso de GitHub (+ lint sandbox)
+ANALYSIS_TIMEOUT = 120  # análisis completo con Claude
 
 
 def md_to_telegram(text: str) -> str:
@@ -276,24 +281,43 @@ class TelegramChannel:
         convo = Conversation(self._pool, self._agent, self._owner_session, channel="telegram")
         await context.bot.send_chat_action(chat_id=msg.chat_id, action=ChatAction.TYPING)
 
-        # H4: ¿el mensaje trae un URL de PR? → enriquecer con contexto + QA.
+        # H4: ¿el mensaje trae un recurso de GitHub? → enriquecer con QA.
+        # TODO con TIMEOUT: si tarda demasiado (PR enorme, red lenta) cortamos
+        # y avisamos, en vez de quedar congelados en silencio (bug encontrado
+        # por Brian con el PR #134). asyncio.wait_for garantiza recuperación.
         prompt = msg.text
         try:
-            enriched = await analizar_pr(self._pool, self._owner_session, msg.text)
+            enriched = await asyncio.wait_for(
+                analizar_pr(self._pool, self._owner_session, msg.text),
+                timeout=GITHUB_TIMEOUT,
+            )
+        except TimeoutError:
+            await msg.reply_text(
+                "⏱️ Tardé demasiado trayendo ese recurso de GitHub (¿es muy grande?). "
+                "Intenta con algo más pequeño o un archivo específico."
+            )
+            return
         except Exception:
-            logger.exception("error trayendo el PR")
+            logger.exception("error trayendo el recurso de GitHub")
             enriched = None
         if enriched is not None:
             if enriched.startswith("__DIRECT__"):  # error legible del tool
                 await msg.reply_text(enriched.removeprefix("__DIRECT__"))
                 return
-            prompt = enriched  # el agente analizará el PR con formato QA
+            prompt = enriched  # el agente analizará con formato QA
 
         try:
-            # Nota: el provider es síncrono por dentro (bloquea el loop unos
-            # segundos durante la llamada a Claude). Aceptable con 1 usuario;
-            # R3 lo vuelve async (httpx.AsyncClient).
-            resp = await convo.send(prompt, max_tokens=2048)
+            # Nota: el provider es síncrono por dentro. wait_for evita que un
+            # análisis largo congele al bot para siempre (R3 lo hará async).
+            resp = await asyncio.wait_for(
+                convo.send(prompt, max_tokens=2048), timeout=ANALYSIS_TIMEOUT
+            )
+        except TimeoutError:
+            await msg.reply_text(
+                "⏱️ El análisis tardó demasiado (más de 2 min). Suele pasar con "
+                "código muy grande. Intenta con algo más acotado."
+            )
+            return
         except RateLimitExceeded as exc:
             await msg.reply_text(f"⏳ {exc}")
             return

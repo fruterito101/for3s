@@ -249,13 +249,9 @@ class GitHubTool:
         """Trae un archivo suelto de un repo (github.com/.../blob/ref/path)."""
         import base64
 
-        data = self._get(
-            f"/repos/{owner}/{repo}/contents/{path}", params={"ref": ref}
-        ).json()
+        data = self._get(f"/repos/{owner}/{repo}/contents/{path}", params={"ref": ref}).json()
         try:
-            content = base64.b64decode(data.get("content", "")).decode(
-                "utf-8", errors="replace"
-            )
+            content = base64.b64decode(data.get("content", "")).decode("utf-8", errors="replace")
         except Exception:
             content = "(no se pudo decodificar — ¿binario?)"
         return CodeSnippet(
