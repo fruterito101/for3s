@@ -136,13 +136,17 @@ async def get_last_repo(pool: asyncpg.Pool, session_id: str) -> tuple[str, str] 
     return (owner, repo) if owner and repo else None
 
 
-# Mapa: nombre de tool MCP → kind de gh_resources (las que traen UN recurso).
-# Los listados (list_issues/list_pull_requests) NO se persisten como recurso
-# único — traen muchos a medias; el valor está en leer uno (read).
+# Mapa: nombre de tool MCP → kind de gh_resources. Ahora TODAS las tools de
+# lectura se persisten (no solo las de recurso único): los read como su tipo,
+# los listados como 'list', la búsqueda como 'search'. Así queda consultable
+# todo lo que el agente trajo de GitHub (para los H futuros).
 _TOOL_KIND = {
     "issue_read": "issue",
     "pull_request_read": "pr",
     "get_file_contents": "file",
+    "list_issues": "list",
+    "list_pull_requests": "list",
+    "search_code": "search",
 }
 
 
@@ -163,23 +167,54 @@ async def save_gh_tool_calls(
     for tc in tool_calls:
         kind = _TOOL_KIND.get(tc.get("name", ""))
         if kind is None:
-            continue  # listados/búsquedas no se persisten como recurso único
+            continue
+        raw_result = tc.get("result") or ""
         try:
-            data = json.loads(tc.get("result") or "{}")
+            data = json.loads(raw_result)
         except (ValueError, TypeError):
-            continue
-        if not isinstance(data, dict):
-            continue
+            data = None
         args = tc.get("args", {})
-        owner = args.get("owner") or data.get("owner") or ""
-        repo = args.get("repo") or data.get("repo") or ""
-        number = args.get("issue_number") or args.get("pull_number") or args.get("pullNumber")
-        try:
-            number = int(number) if number is not None else None
-        except (ValueError, TypeError):
-            number = None
-        user = data.get("user")
-        author = user.get("login") if isinstance(user, dict) else data.get("author")
+        owner = args.get("owner") or ""
+        repo = args.get("repo") or ""
+
+        # Campos por tipo. Los read (issue/pr/file) traen un dict con detalle;
+        # los list/search traen una lista (o dict con lista) → guardamos un
+        # resumen + el raw completo. Defensivo ante formatos variados.
+        title = body = author = state = path = None
+        number = None
+        if isinstance(data, dict):
+            owner = owner or data.get("owner") or ""
+            repo = repo or data.get("repo") or ""
+            title = data.get("title")
+            user = data.get("user")
+            author = user.get("login") if isinstance(user, dict) else data.get("author")
+            state = data.get("state")
+            body = data.get("body")
+            n = args.get("issue_number") or args.get("pull_number") or args.get("pullNumber")
+            try:
+                number = int(n) if n is not None else None
+            except (ValueError, TypeError):
+                number = None
+        if kind in ("list", "search"):
+            # resumen legible del listado/búsqueda (cuántos resultados trajo)
+            n_items = len(data) if isinstance(data, list) else (
+                len(data.get("items", [])) if isinstance(data, dict) else 0
+            )
+            title = f"{tc.get('name')} → {n_items} resultados"
+            path = args.get("path")
+        if kind == "file" and not body:
+            # get_file_contents: el contenido del archivo suele venir como TEXTO
+            # plano (no JSON, ej. un README). Lo guardamos como body.
+            body = raw_result
+
+        # La columna raw es JSONB → SIEMPRE pasar JSON válido. Si el result no
+        # parseó (texto plano como un README), lo envolvemos. Evita el error
+        # "invalid input syntax for type json".
+        if data is not None:
+            raw_json = json.dumps(data)[:50_000]
+        else:
+            raw_json = json.dumps({"raw_text": raw_result[:50_000]})
+
         async with pool.acquire() as conn:
             await conn.execute(
                 """
@@ -194,12 +229,12 @@ async def save_gh_tool_calls(
                 owner,
                 repo,
                 number,
-                args.get("path"),
-                data.get("title"),
+                path or args.get("path"),
+                title,
                 author,
-                data.get("state"),
-                (data.get("body") or "")[:8000],
-                json.dumps(data)[:50_000],
+                state,
+                (body or "")[:8000],
+                raw_json,  # SIEMPRE JSON válido (envuelto si era texto plano)
             )
         guardados += 1
     return guardados
