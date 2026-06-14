@@ -20,6 +20,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
+import time
 from pathlib import Path
 
 from telegram import Update
@@ -213,6 +215,8 @@ class TelegramChannel:
         self._pool = None
         self._agent: Agent | None = None
         self._mcp: GitHubMCPClient | None = None  # sesión MCP GitHub (Paso 4-6)
+        self._started_at: float = time.time()  # para /estado (uptime)
+        self._model: str = "?"  # se llena en setup()
         self._cupo_msg_id: dict[int, int] = pin_store.load()  # persistido entre reinicios
         self._last_cupo: tuple[float | None, float | None] = (
             None,
@@ -231,6 +235,7 @@ class TelegramChannel:
             token=settings.anthropic_token, oauth=settings.is_oauth, model=settings.model
         )
         self._agent = Agent(provider)
+        self._model = settings.model
         logger.info("cerebro conectado (modelo=%s auth=%s)", settings.model, settings.auth_mode)
 
         # MCP GitHub (Paso 4-6): sesión persistente, PAT del SecretStore (KEK).
@@ -356,6 +361,101 @@ class TelegramChannel:
             await msg.reply_text(
                 "🔋 Aún no tengo dato de cupo — mándame un mensaje y te lo muestro."
             )
+
+    # ───────── comandos de ADMINISTRACIÓN (solo dueño/admin) ─────────
+
+    def _es_admin(self, user_id: int | None) -> bool:
+        """¿Puede usar comandos de admin? Hoy = el dueño. Base para rol admin
+        futuro (multi-usuario): aquí se añadiría la lista de admins extra."""
+        # TODO multi-usuario: admitir también IDs con rol 'admin' explícito.
+        return self._owners.is_authorized(user_id)
+
+    async def on_estado(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """/estado — salud rápida del agente (cero tokens)."""
+        msg, user = update.message, update.effective_user
+        if msg is None or user is None:
+            return
+        if not self._es_admin(user.id):
+            await msg.reply_text("⛔ Comando solo para el dueño.")
+            return
+        up = int(time.time() - self._started_at)
+        h, m = up // 3600, (up % 3600) // 60
+        mcp = "✅ conectado" if self._mcp is not None else "❌ no disponible"
+        u5, u7 = self._last_cupo
+        cupo = format_cupo(u5, u7) or "sin dato aún"
+        await msg.reply_text(
+            f"🤖 *Estado de For3s OS*\n"
+            f"• Modelo: {self._model}\n"
+            f"• GitHub MCP: {mcp}\n"
+            f"• {cupo}\n"
+            f"• Activo desde hace: {h}h {m}m",
+        )
+
+    async def on_diagnostico(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """/diagnostico — mini-reporte: últimos turnos + tools recientes."""
+        msg, user = update.message, update.effective_user
+        if msg is None or user is None:
+            return
+        if not self._es_admin(user.id):
+            await msg.reply_text("⛔ Comando solo para el dueño.")
+            return
+        if self._pool is None:
+            await msg.reply_text("🩺 Aún sin conexión a la BD.")
+            return
+        from for3s_core import memory
+
+        turns = await memory.load_history(self._pool, self._owner_session, last_n=4)
+        lineas = ["🩺 *Diagnóstico rápido*", f"Últimos {len(turns)} turnos:"]
+        for t in turns:
+            quien = "👤" if t.role == "user" else "🤖"
+            lineas.append(f"{quien} {t.content[:60].replace(chr(10), ' ')}")
+        mcp = "✅" if self._mcp is not None else "❌"
+        lineas.append(f"\nGitHub MCP: {mcp} · modelo: {self._model}")
+        await msg.reply_text("\n".join(lineas))
+
+    async def on_reiniciar(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """/reiniciar — reinicio SUAVE: reconecta el GitHub MCP (sin matar proceso)."""
+        msg, user = update.message, update.effective_user
+        if msg is None or user is None:
+            return
+        if not self._es_admin(user.id):
+            await msg.reply_text("⛔ Comando solo para el dueño.")
+            return
+        await msg.reply_text("🔄 Reinicio suave: reconectando el GitHub MCP…")
+        try:
+            if self._mcp is not None:
+                await self._mcp.aclose()
+            settings = load_settings()
+            pat = await SecretStore(self._pool).get_secret(settings.owner_session, "github_token")
+            mcp = GitHubMCPClient(pat, read_only=True)
+            await mcp.start()
+            self._mcp = mcp
+            await msg.reply_text("✅ Listo — GitHub MCP reconectado. Todo fresco.")
+        except Exception:
+            logger.exception("fallo el reinicio suave del MCP")
+            self._mcp = None
+            await msg.reply_text(
+                "⚠️ No pude reconectar el GitHub MCP. El chat sigue funcionando; "
+                "si necesitas GitHub, usa /reiniciar_duro."
+            )
+
+    async def on_reiniciar_duro(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """/reiniciar_duro — reinicia el PROCESO entero (systemd lo revive)."""
+        msg, user = update.message, update.effective_user
+        if msg is None or user is None:
+            return
+        if not self._es_admin(user.id):
+            await msg.reply_text("⛔ Comando solo para el dueño.")
+            return
+        await msg.reply_text(
+            "🔄 Reinicio completo — me apago y systemd me revive en ~10s. "
+            "Mándame un 'hola' en un momento para confirmar que volví."
+        )
+        # El bot no puede `sudo systemctl restart` (sin password). En su lugar
+        # SALE con código de error → systemd (Restart=on-failure) lo relanza.
+        # os._exit fuerza la salida inmediata tras avisar al usuario.
+        logger.warning("reinicio duro solicitado por el dueño — saliendo para que systemd relance")
+        os._exit(1)
 
     async def on_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         user = update.effective_user
@@ -498,6 +598,11 @@ def main() -> int:
     )
     app.add_handler(CommandHandler("start", channel.on_start))
     app.add_handler(CommandHandler("cupo", channel.on_cupo))
+    # comandos de administración (solo dueño/admin)
+    app.add_handler(CommandHandler("estado", channel.on_estado))
+    app.add_handler(CommandHandler("diagnostico", channel.on_diagnostico))
+    app.add_handler(CommandHandler("reiniciar", channel.on_reiniciar))
+    app.add_handler(CommandHandler("reiniciar_duro", channel.on_reiniciar_duro))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, channel.on_message))
 
     logger.info("For3s OS Telegram: arrancando polling...")
