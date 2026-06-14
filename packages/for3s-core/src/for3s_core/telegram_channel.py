@@ -61,6 +61,7 @@ GITHUB_TIMEOUT = 60  # traer el recurso de GitHub (+ lint sandbox)
 # algo se cuelga. Combinado con el fix de que RateLimitExceeded SÍ se propaga.
 ANALYSIS_TIMEOUT = 180
 TYPING_REFRESH = 4  # cada cuántos seg re-enviar "escribiendo..." (Telegram lo apaga a los ~5s)
+MAX_EN_COLA = 3  # Parte B: máx tareas GitHub esperando turno; más allá, se rechaza
 # H-A: umbral para avisar "esto puede tardar" — toda tarea que use tools de
 # GitHub (huele_a_github) manda un aviso inicial, porque suelen tardar 30-60s.
 
@@ -218,6 +219,12 @@ class TelegramChannel:
         self._mcp: GitHubMCPClient | None = None  # sesión MCP GitHub (Paso 4-6)
         self._started_at: float = time.time()  # para /estado (uptime)
         self._model: str = "?"  # se llena en setup()
+        # Parte B (anti-rate-limit): cola SERIAL para tareas GitHub. Un Lock
+        # garantiza que solo UN análisis tool-use corre a la vez (no se solapan
+        # ráfagas que saturarían el rate-limit). _en_cola cuenta los que esperan
+        # (para el límite + feedback al usuario). La charla normal NO usa esto.
+        self._gh_lock: asyncio.Lock = asyncio.Lock()
+        self._en_cola: int = 0  # cuántas tareas GitHub esperan turno
         self._cupo_msg_id: dict[int, int] = pin_store.load()  # persistido entre reinicios
         self._last_cupo: tuple[float | None, float | None] = (
             None,
@@ -487,15 +494,40 @@ class TelegramChannel:
         # responde igual; las tools solo se ofrecen cuando tienen sentido (ahorra
         # rate-limit del tool-use — ver hallazgo Paso 3).
         usa_tools = self._mcp is not None and huele_a_github(texto)
-        # H-A: si la tarea usará GitHub (suele tardar 30-60s), AVISAR de
-        # inmediato que estamos en ello. Garantiza un primer mensaje (el usuario
-        # ve que arrancó) + el "escribiendo..." persistente. El resultado final
-        # llega como segundo mensaje cuando termina (sin pedir "continúa").
+
+        # Parte B (cola serial anti-rate-limit): las tareas GitHub se procesan
+        # DE A UNA (un Lock) para no solapar ráfagas de tool-use que saturan el
+        # rate-limit. Si ya hay una corriendo, esta espera turno y se avisa.
+        # La charla normal NO usa la cola → sigue instantánea en paralelo.
         if usa_tools:
-            await msg.reply_text(
-                "🔍 Trabajando en eso — puede tardar un momento, ya te traigo el resultado…"
-            )
+            if self._en_cola >= MAX_EN_COLA:
+                typing_task.cancel()
+                await _responder_seguro(
+                    msg,
+                    f"📋 Estoy saturado ({MAX_EN_COLA} análisis en espera). Dame "
+                    "un momento a que baje la cola y reintenta — así no topo el "
+                    "límite de Claude.",
+                )
+                return
+            if self._gh_lock.locked():
+                await _responder_seguro(
+                    msg,
+                    f"📋 En cola (hay {self._en_cola + 1} análisis antes). Lo "
+                    "proceso en cuanto termine el actual — no tienes que repetir.",
+                )
+            else:
+                await msg.reply_text(
+                    "🔍 Trabajando en eso — puede tardar un momento, ya te traigo el resultado…"
+                )
+
         try:
+            # adquirir el carril serial SOLO para tareas GitHub (espera su turno)
+            tengo_lock = False
+            if usa_tools:
+                self._en_cola += 1
+                await self._gh_lock.acquire()
+                self._en_cola -= 1
+                tengo_lock = True
             try:
                 if usa_tools:
                     resp = await asyncio.wait_for(
@@ -532,6 +564,10 @@ class TelegramChannel:
         finally:
             # detener el "escribiendo..." pase lo que pase (éxito, error, timeout)
             typing_task.cancel()
+            # Parte B: liberar el carril serial SOLO si ESTA invocación lo
+            # adquirió (tengo_lock) → no liberar uno ajeno.
+            if tengo_lock:
+                self._gh_lock.release()
 
         for chunk in split_message(md_to_telegram(resp.text)):
             await msg.reply_text(chunk)
