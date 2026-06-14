@@ -54,11 +54,12 @@ ALERT_THRESHOLD = 0.80
 
 # Timeouts (segundos) para no quedar congelados en operaciones largas.
 GITHUB_TIMEOUT = 60  # traer el recurso de GitHub (+ lint sandbox)
-# H-A: timeout de SEGURIDAD (no de "tardó demasiado"). Antes era 120s y ABORTABA
-# el análisis a los 2 min → el resultado nunca llegaba, el usuario tenía que
-# decir "continúa". Ahora 480s (8 min): margen amplísimo (los análisis más
-# largos vistos fueron ~60s) y solo corta si algo quedó colgado DE VERDAD.
-ANALYSIS_TIMEOUT = 480
+# H-A: timeout de SEGURIDAD (no de "tardó demasiado"). Antes 120s ABORTABA a
+# los 2 min. Se subió a 480s pero 8 min era DEMASIADO: ante un rate-limit con
+# backoff, el bot quedaba congelado 8 min sin avisar (bug visto 06-14). 180s
+# (3 min): margen amplio (análisis reales ~60s) pero corta y avisa pronto si
+# algo se cuelga. Combinado con el fix de que RateLimitExceeded SÍ se propaga.
+ANALYSIS_TIMEOUT = 180
 TYPING_REFRESH = 4  # cada cuántos seg re-enviar "escribiendo..." (Telegram lo apaga a los ~5s)
 # H-A: umbral para avisar "esto puede tardar" — toda tarea que use tools de
 # GitHub (huele_a_github) manda un aviso inicial, porque suelen tardar 30-60s.

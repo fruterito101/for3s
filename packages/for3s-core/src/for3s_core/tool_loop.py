@@ -19,7 +19,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 
-from for3s_core.llm import ClaudeProvider
+from for3s_core.llm import ClaudeProvider, RateLimitExceeded
 from for3s_core.mcp_client import GitHubMCPClient
 
 # Tope de vueltas tool→result→tool por turno. CADA vuelta = 1 request con tools
@@ -165,6 +165,8 @@ async def run_tool_loop(
         usage = data.get("usage", {})
         out.input_tokens += usage.get("input_tokens", 0)
         out.output_tokens += usage.get("output_tokens", 0)
+    except RateLimitExceeded:
+        raise  # el rate-limit DEBE propagarse para que el canal avise al usuario
     except Exception:
         pass
     out.text = (
