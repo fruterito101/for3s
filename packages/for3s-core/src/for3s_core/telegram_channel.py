@@ -51,8 +51,14 @@ ALERT_THRESHOLD = 0.80
 
 # Timeouts (segundos) para no quedar congelados en operaciones largas.
 GITHUB_TIMEOUT = 60  # traer el recurso de GitHub (+ lint sandbox)
-ANALYSIS_TIMEOUT = 120  # análisis completo con Claude
+# H-A: timeout de SEGURIDAD (no de "tardó demasiado"). Antes era 120s y ABORTABA
+# el análisis a los 2 min → el resultado nunca llegaba, el usuario tenía que
+# decir "continúa". Ahora 480s (8 min): margen amplísimo (los análisis más
+# largos vistos fueron ~60s) y solo corta si algo quedó colgado DE VERDAD.
+ANALYSIS_TIMEOUT = 480
 TYPING_REFRESH = 4  # cada cuántos seg re-enviar "escribiendo..." (Telegram lo apaga a los ~5s)
+# H-A: umbral para avisar "esto puede tardar" — toda tarea que use tools de
+# GitHub (huele_a_github) manda un aviso inicial, porque suelen tardar 30-60s.
 
 
 async def _mantener_typing(bot, chat_id: int) -> None:
@@ -357,6 +363,14 @@ class TelegramChannel:
         # responde igual; las tools solo se ofrecen cuando tienen sentido (ahorra
         # rate-limit del tool-use — ver hallazgo Paso 3).
         usa_tools = self._mcp is not None and huele_a_github(msg.text)
+        # H-A: si la tarea usará GitHub (suele tardar 30-60s), AVISAR de
+        # inmediato que estamos en ello. Garantiza un primer mensaje (el usuario
+        # ve que arrancó) + el "escribiendo..." persistente. El resultado final
+        # llega como segundo mensaje cuando termina (sin pedir "continúa").
+        if usa_tools:
+            await msg.reply_text(
+                "🔍 Trabajando en eso — puede tardar un momento, ya te traigo el resultado…"
+            )
         try:
             try:
                 if usa_tools:
@@ -371,8 +385,9 @@ class TelegramChannel:
                     )
             except TimeoutError:
                 await msg.reply_text(
-                    "⏱️ El análisis tardó demasiado (más de 2 min). Suele pasar con "
-                    "código muy grande. Intenta con algo más acotado."
+                    "⏱️ Algo se quedó atascado en esta tarea (pasó el límite de "
+                    "seguridad de 8 min). No fue por tu pregunta — reintenta, y si "
+                    "vuelve a pasar avísame para revisar."
                 )
                 return
             except RateLimitExceeded as exc:
