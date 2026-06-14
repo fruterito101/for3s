@@ -40,6 +40,7 @@ from for3s_core.conversation import Conversation, huele_a_github
 from for3s_core.llm import ClaudeProvider, RateLimitExceeded
 from for3s_core.mcp_client import GitHubMCPClient
 from for3s_core.secret_store import SecretStore
+from for3s_core.text_normalize import limpiar_urls
 
 logger = logging.getLogger("for3s.telegram")
 
@@ -75,6 +76,24 @@ async def _mantener_typing(bot, chat_id: int) -> None:
             await asyncio.sleep(TYPING_REFRESH)
     except asyncio.CancelledError:
         pass  # cancelada al terminar el proceso: salida limpia
+
+
+async def _responder_seguro(msg, texto: str) -> None:
+    """Manda un mensaje al usuario reintentando si Telegram falla.
+
+    H-A/UX: NUNCA dejar al usuario sin desenlace. Si un aviso de error o
+    resultado no se envía a la primera (red, rate-limit de Telegram), reintenta
+    un par de veces. Si aun así falla, lo registra — pero al menos lo intentó.
+    """
+    for intento in range(3):
+        try:
+            await msg.reply_text(texto)
+            return
+        except Exception:
+            if intento < 2:
+                await asyncio.sleep(2)
+            else:
+                logger.exception("no pude entregar el mensaje al usuario tras 3 intentos")
 
 
 def md_to_telegram(text: str) -> str:
@@ -349,6 +368,10 @@ class TelegramChannel:
             return
         assert self._pool is not None and self._agent is not None
 
+        # Limpiar tracking params de URLs (ej. ?fbclid=... de Facebook al pegar)
+        # → el URL queda limpio (github.com/owner/repo) para detección y agente.
+        texto = limpiar_urls(msg.text)
+
         # memoria COMPARTIDA con el CLI (decisión de Brian): sesión del dueño.
         convo = Conversation(self._pool, self._agent, self._owner_session, channel="telegram")
         # "escribiendo..." PERSISTENTE: tarea en segundo plano que lo mantiene
@@ -362,7 +385,7 @@ class TelegramChannel:
         # MCP está caído, va el flujo de chat normal (send). El segundo cerebro
         # responde igual; las tools solo se ofrecen cuando tienen sentido (ahorra
         # rate-limit del tool-use — ver hallazgo Paso 3).
-        usa_tools = self._mcp is not None and huele_a_github(msg.text)
+        usa_tools = self._mcp is not None and huele_a_github(texto)
         # H-A: si la tarea usará GitHub (suele tardar 30-60s), AVISAR de
         # inmediato que estamos en ello. Garantiza un primer mensaje (el usuario
         # ve que arrancó) + el "escribiendo..." persistente. El resultado final
@@ -375,27 +398,35 @@ class TelegramChannel:
             try:
                 if usa_tools:
                     resp = await asyncio.wait_for(
-                        convo.send_with_tools(msg.text, self._mcp, max_tokens=2048),
+                        convo.send_with_tools(texto, self._mcp, max_tokens=2048),
                         timeout=ANALYSIS_TIMEOUT,
                     )
                 else:
                     resp = await asyncio.wait_for(
-                        convo.send(msg.text, max_tokens=2048),
+                        convo.send(texto, max_tokens=2048),
                         timeout=ANALYSIS_TIMEOUT,
                     )
             except TimeoutError:
-                await msg.reply_text(
+                await _responder_seguro(
+                    msg,
                     "⏱️ Algo se quedó atascado en esta tarea (pasó el límite de "
                     "seguridad de 8 min). No fue por tu pregunta — reintenta, y si "
-                    "vuelve a pasar avísame para revisar."
+                    "vuelve a pasar avísame para revisar.",
                 )
                 return
             except RateLimitExceeded as exc:
-                await msg.reply_text(f"⏳ {exc}")
+                await _responder_seguro(
+                    msg,
+                    f"⏳ Topé el límite de uso de Claude por ahora (pasa al hacer "
+                    f"varias consultas seguidas a GitHub). {exc} Espera ~1 min y "
+                    f"reintenta — tu pregunta estaba bien.",
+                )
                 return
             except Exception:
                 logger.exception("error procesando mensaje")
-                await msg.reply_text("❌ Algo falló procesando tu mensaje. Intenta de nuevo.")
+                await _responder_seguro(
+                    msg, "❌ Algo falló procesando tu mensaje. Intenta de nuevo."
+                )
                 return
         finally:
             # detener el "escribiendo..." pase lo que pase (éxito, error, timeout)

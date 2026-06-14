@@ -18,6 +18,31 @@ import unicodedata
 
 _ESPACIOS_RE = re.compile(r"\s+")
 
+# Tracking params que ensucian los URLs de GitHub al copiar/pegar (Facebook,
+# Google, etc.). Se quitan para que el URL quede limpio (github.com/owner/repo).
+_TRACKING_RE = re.compile(
+    r"(\?|&)(fbclid|gclid|utm_[\w]+|aem_[\w]+|ref|ref_src|s|t)=[^\s&]*",
+    re.IGNORECASE,
+)
+
+
+def limpiar_urls(texto: str) -> str:
+    """Quita parámetros de tracking de los URLs (ej. ?fbclid=...) — texto limpio.
+
+    NO toca lo demás del texto; solo elimina la basura de tracking de los URLs.
+    Conserva mayúsculas/acentos (esto NO es normalizar, es solo limpieza de URL).
+    Ejemplo: "github.com/Aider-AI/aider?fbclid=Iw..." → "github.com/Aider-AI/aider"
+    """
+    if not texto:
+        return texto
+    # aplicar repetido por si hay varios params encadenados (?a=1&b=2)
+    prev = None
+    t = texto
+    while t != prev:
+        prev = t
+        t = _TRACKING_RE.sub("", t)
+    return t
+
 
 def normalizar(texto: str) -> str:
     """Estandariza texto para detección: minúsculas + sin acentos + espacios.
