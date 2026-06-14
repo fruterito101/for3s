@@ -81,7 +81,12 @@ async def run_tool_loop(
     tools = [t for t in all_tools if t["name"] in MVP_TOOLS]
     out = ToolLoopResult(text="")
 
-    for _ in range(MAX_TOOL_ROUNDS):
+    for vuelta in range(MAX_TOOL_ROUNDS):
+        # H-F: en la PRIMERA vuelta forzar el uso de tool (tool_choice="any")
+        # → el modelo NO puede narrar/inventar, tiene que ejecutar. En las
+        # vueltas siguientes vuelve a "auto" para que pueda RESPONDER con el
+        # resultado (si forzáramos siempre, nunca daría la respuesta final).
+        tool_choice = {"type": "any"} if (vuelta == 0 and tools) else None
         # complete_with_tools es SÍNCRONO (httpx) → to_thread para no bloquear
         data, headers = await asyncio.to_thread(
             provider.complete_with_tools,
@@ -89,6 +94,7 @@ async def run_tool_loop(
             system=system,
             tools=tools,
             max_tokens=max_tokens,
+            tool_choice=tool_choice,
         )
 
         usage = data.get("usage", {})

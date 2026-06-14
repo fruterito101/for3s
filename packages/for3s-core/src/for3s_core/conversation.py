@@ -45,11 +45,15 @@ _GH_HINT_RE = re.compile(
 # revisar..." sin EJECUTAR la tool. Esta instrucción lo corrige: usar la tool
 # de inmediato y responder con el dato, sin narrar la intención.
 TOOL_DIRECTIVE = (
-    "\n\n[INSTRUCCIÓN: tienes herramientas de GitHub disponibles. Si necesitas "
-    "datos de un repo/PR/issue para responder, LLÁMALAS AHORA directamente — NO "
-    "digas 'déjame revisar' ni 'voy a consultar' sin hacerlo. Ejecuta la "
-    "herramienta y responde con el dato real. Si una herramienta ya te dio el "
-    "resultado, úsalo para responder; no la vuelvas a llamar sin necesidad.]"
+    "\n\n[INSTRUCCIÓN CRÍTICA: tienes herramientas de GitHub disponibles. Si "
+    "necesitas datos de un repo/PR/issue, LLÁMALAS AHORA directamente — NO digas "
+    "'déjame revisar' ni 'voy a consultar' sin hacerlo. "
+    "PROHIBIDO ABSOLUTO: NUNCA describas el contenido, stack, arquitectura o "
+    "estado de un repo/PR/issue que NO hayas leído con una herramienta en ESTE "
+    "turno. Si no ejecutaste la herramienta, NO inventes nada — di claramente "
+    "que no pudiste traer el dato. Inventar contenido de un repo es el peor error "
+    "posible. Solo afirma lo que la herramienta te devolvió de verdad. "
+    "Si una herramienta ya te dio el resultado, úsalo para responder.]"
 )
 
 

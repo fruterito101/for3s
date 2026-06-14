@@ -192,6 +192,7 @@ class ClaudeProvider(LLMProvider):
         system: str = "",
         tools: list[dict] | None = None,
         max_tokens: int = 2048,
+        tool_choice: dict | None = None,
     ) -> tuple[dict, dict]:
         """Una vuelta del loop de tool-use (Paso 3 migración GitHub→MCP).
 
@@ -213,6 +214,10 @@ class ClaudeProvider(LLMProvider):
             payload["system"] = full_system
         if tools:
             payload["tools"] = tools
+        # H-F: tool_choice fuerza a usar tool (ej. {"type":"any"}) — evita que
+        # el modelo narre/invente en vez de ejecutar. Solo si se pide y hay tools.
+        if tool_choice and tools:
+            payload["tool_choice"] = tool_choice
 
         # estimación gruesa para el gestor de concurrencia
         approx = sum(len(str(m.get("content", ""))) for m in messages) // 3
