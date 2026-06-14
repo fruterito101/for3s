@@ -134,14 +134,17 @@ class ClaudeProvider(LLMProvider):
                 if attempt < max_retries - 1:
                     self._sleep(wait)
                     continue
-                resp.raise_for_status()
+                # Agotados los reintentos por 429 → mensaje AMIGABLE, no traceback.
+                # El tool-use con suscripción topa el rate-limit instantáneo más
+                # rápido (payloads grandes); cuando insiste, avisamos con gracia.
+                raise RateLimitExceeded(wait)
 
             resp.raise_for_status()
             # CAPA 2: aprende de los headers cuánta cuota queda
             self._manager.report(self._model, parse_ratelimit_headers(resp.headers))
             return resp.json(), resp.headers
 
-        raise RuntimeError("agotados los reintentos por rate limit (429)")
+        raise RateLimitExceeded(parse_retry_after({}))
 
     def complete(
         self, user_message: str, *, system: str = "", max_tokens: int = 1024
@@ -181,3 +184,38 @@ class ClaudeProvider(LLMProvider):
             usage_5h=_pct("anthropic-ratelimit-unified-5h-utilization"),
             usage_7d=_pct("anthropic-ratelimit-unified-7d-utilization"),
         )
+
+    def complete_with_tools(
+        self,
+        messages: list[dict],
+        *,
+        system: str = "",
+        tools: list[dict] | None = None,
+        max_tokens: int = 2048,
+    ) -> tuple[dict, dict]:
+        """Una vuelta del loop de tool-use (Paso 3 migración GitHub→MCP).
+
+        A diferencia de complete() (1 user_message, solo texto), recibe el
+        historial messages[] COMPLETO (incluyendo bloques tool_use/tool_result)
+        y la lista de `tools`. Devuelve (data_cruda, headers) — el LOOP de arriba
+        inspecciona stop_reason y los bloques tool_use. NO aplana a texto: eso
+        lo decide el caller.
+
+        Reusa toda la robustez de _post (concurrencia + retry-after + headers).
+        """
+        payload: dict = {
+            "model": self._model,
+            "max_tokens": max_tokens,
+            "messages": messages,
+        }
+        full_system = self._build_system(system)
+        if full_system:
+            payload["system"] = full_system
+        if tools:
+            payload["tools"] = tools
+
+        # estimación gruesa para el gestor de concurrencia
+        approx = sum(len(str(m.get("content", ""))) for m in messages) // 3
+        est_in = max(200, approx + len(full_system) // 3)
+        data, resp_headers = self._post(payload, est_in=est_in, est_out=max_tokens)
+        return data, resp_headers
