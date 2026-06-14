@@ -24,6 +24,8 @@ from dataclasses import dataclass, field
 
 import httpx
 
+from for3s_core.text_normalize import normalizar
+
 API = "https://api.github.com"
 PR_URL_RE = re.compile(
     r"https?://github\.com/(?P<owner>[\w.\-]+)/(?P<repo>[\w.\-]+)/pull/(?P<number>\d+)"
@@ -185,7 +187,12 @@ def detect_short_ref(text: str) -> tuple[str, int] | None:
     Solo activa con palabra clave + número ("PR 134", "issue #13") — NO con un
     número suelto. Devuelve None si no hay referencia clara. El repo se resuelve
     aparte (último repo visto en la sesión). PR tiene prioridad sobre issue.
+
+    Normaliza primero (minúsculas + sin acentos) → robusto ante "PR"/"pr"/"Pr".
+    NOTA: detect_resource (URLs completos) NO se normaliza — las URLs son
+    case-sensitive (gist_id hex, paths).
     """
+    text = normalizar(text)
     pr = SHORT_PR_RE.search(text)
     if pr:
         return "pr", int(pr.group("number"))

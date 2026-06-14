@@ -23,6 +23,7 @@ from for3s_core import audit, memory
 from for3s_core.agent import FOR3S_ROLE, Agent
 from for3s_core.llm import LLMResponse
 from for3s_core.mcp_client import GitHubMCPClient
+from for3s_core.text_normalize import normalizar
 from for3s_core.tool_loop import run_tool_loop
 
 # Cuántos turnos recientes se le pasan a Claude como contexto. NO todo el
@@ -73,8 +74,12 @@ TOOL_DIRECTIVE = (
 
 
 def huele_a_github(text: str) -> bool:
-    """True si el mensaje parece referirse a GitHub/código → activar tools."""
-    return bool(_GH_HINT_RE.search(text))
+    """True si el mensaje parece referirse a GitHub/código → activar tools.
+
+    Normaliza primero (minúsculas + sin acentos) → robusto ante MAYÚSCULAS,
+    minúsculas o InTeRcAlAdO. El regex igual usa IGNORECASE como respaldo.
+    """
+    return bool(_GH_HINT_RE.search(normalizar(text)))
 
 
 class Conversation:
