@@ -37,17 +37,19 @@ MAX_TOOL_ROUNDS = 5
 # de 1 sola llamada.
 ESPACIADO_ENTRE_VUELTAS = 3.0
 
-# Whitelist MVP: las tools de LECTURA esenciales. CLAVE (verificado en pruebas):
-# mandar muchos schemas de tool en cada request infla el input y la suscripción
-# devuelve 429 (rate_limit_error) por encima de ~4-5 tools con schemas grandes.
-# Por eso el MVP usa un set MÍNIMO que cubre lo esencial: listar y leer issues
-# y PRs. get_file_contents/search se agregan después (Paso 5) si el payload lo
-# permite, o se rota el set según la intención. Menos tools = más barato y sin 429.
+# Whitelist MVP: las tools de LECTURA esenciales. Antes solo 4 (issues/PRs) →
+# por eso "analizar un repo completo" fallaba: el agente no podía LEER el
+# contenido del repo (README, archivos). Ahora 6, incluyendo get_file_contents
+# (leer README/archivos) y search_code (buscar en el repo) → puede analizar un
+# repo de verdad. El riesgo de rate-limit por # de schemas se mitiga con el
+# prompt caching (Parte C). Si reaparece el 429 por tamaño, rotar set por intención.
 MVP_TOOLS = {
     "list_issues",
     "issue_read",
     "list_pull_requests",
     "pull_request_read",
+    "get_file_contents",  # leer README/archivos → analizar repo completo
+    "search_code",        # buscar en el repo
 }
 
 

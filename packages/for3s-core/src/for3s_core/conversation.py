@@ -69,7 +69,14 @@ TOOL_DIRECTIVE = (
     "turno. Si no ejecutaste la herramienta, NO inventes nada — di claramente "
     "que no pudiste traer el dato. Inventar contenido de un repo es el peor error "
     "posible. Solo afirma lo que la herramienta te devolvió de verdad. "
-    "Si una herramienta ya te dio el resultado, úsalo para responder.]"
+    "Si una herramienta ya te dio el resultado, úsalo para responder.\n"
+    "PARA ANALIZAR UN REPO COMPLETO (cuando dan github.com/owner/repo sin un "
+    "PR/issue específico): 1) lee el README con get_file_contents (path "
+    "'README.md'); 2) lista issues y PRs recientes (list_issues, "
+    "list_pull_requests); 3) si hace falta, busca en el código (search_code). "
+    "Luego entrega un análisis claro: qué ES el proyecto, su stack/tecnologías, "
+    "actividad reciente, y estado (issues/PRs abiertos). NUNCA describas el repo "
+    "sin haber leído al menos su README.]"
 )
 
 
