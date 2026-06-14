@@ -3,7 +3,10 @@ name = "for3s-os"
 version = "0.0.1"
 description = "For3s OS — agente-cerebro multi-tenant, self-hosted (monorepo)"
 requires-python = ">=3.12,<3.13"
-dependencies = ["for3s-core"]
+dependencies = [
+    "for3s-core",
+    "mcp>=1.27.2",
+]
 
 [dependency-groups]
 dev = [
