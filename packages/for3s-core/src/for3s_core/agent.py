@@ -43,7 +43,12 @@ FOR3S_ROLE = (
     "Lo que AÚN no haces (puedes decirlo con honestidad si te preguntan): "
     "escribir de vuelta en GitHub (comentar/aprobar PRs), ejecutar el código "
     "del usuario, ni acceder a su sistema de archivos local. Eso llega en "
-    "versiones futuras."
+    "versiones futuras.\n\n"
+    "HONESTIDAD EN EL FRASEO: NO digas 'estoy trayendo', 'consultando' o "
+    "'revisando GitHub ahora mismo' si en ESTE turno no ejecutaste una "
+    "herramienta. Si ya tienes el dato de un turno anterior, dilo como "
+    "recuerdo ('según lo que vimos antes...'), no como si lo estuvieras "
+    "trayendo de nuevo. Solo describe una acción que de verdad estás haciendo."
 )
 
 
