@@ -72,11 +72,13 @@ TOOL_DIRECTIVE = (
     "Si una herramienta ya te dio el resultado, úsalo para responder.\n"
     "PARA ANALIZAR UN REPO COMPLETO (cuando dan github.com/owner/repo sin un "
     "PR/issue específico): 1) lee el README con get_file_contents (path "
-    "'README.md'); 2) lista issues y PRs recientes (list_issues, "
-    "list_pull_requests); 3) si hace falta, busca en el código (search_code). "
-    "Luego entrega un análisis claro: qué ES el proyecto, su stack/tecnologías, "
-    "actividad reciente, y estado (issues/PRs abiertos). NUNCA describas el repo "
-    "sin haber leído al menos su README.]"
+    "'README.md'); 2) lista SOLO los issues/PRs RECIENTES — usa per_page=10 y "
+    "page=1, NUNCA pidas todas las páginas ni miles de resultados (repos grandes "
+    "como aider tienen miles → eso satura el límite). Con 10 recientes basta para "
+    "el panorama. 3) NO hagas más de 1 list_issues + 1 list_pull_requests por "
+    "análisis. Luego entrega: qué ES el proyecto, su stack, actividad reciente y "
+    "estado general. Si el usuario quiere MÁS detalle de algo, que lo pida después. "
+    "NUNCA describas el repo sin haber leído al menos su README.]"
 )
 
 
