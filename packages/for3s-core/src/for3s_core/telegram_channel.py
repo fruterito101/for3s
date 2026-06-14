@@ -24,6 +24,7 @@ from pathlib import Path
 
 from telegram import Update
 from telegram.constants import ChatAction
+from telegram.error import BadRequest
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -173,7 +174,10 @@ class TelegramChannel:
         self._last_cupo: tuple[float | None, float | None] = (
             None,
             None,
-        )  # último cupo visto (gratis)
+        )  # ultimo cupo visto (gratis)
+        # ultimo TEXTO de cupo mostrado por chat -> si no cambio, ni tocamos
+        # Telegram (evita el 400 "message is not modified" del Bug G).
+        self._cupo_text: dict[int, str] = {}
 
     async def setup(self, app: Application) -> None:
         """post_init de PTB: conecta el cerebro (pool + provider)."""
@@ -235,14 +239,29 @@ class TelegramChannel:
             return
         existing = self._cupo_msg_id.get(chat_id)
         if existing is not None:
+            # Bug G: si el texto NO cambio desde la ultima vez, no tocar Telegram.
+            # Editar a un texto identico da 400 "message is not modified" → ruido
+            # + recreacion del pin + parpadeo. Si es igual, ya esta mostrado: salir.
+            if self._cupo_text.get(chat_id) == text:
+                return
             try:
                 await context.bot.edit_message_text(text, chat_id=chat_id, message_id=existing)
+                self._cupo_text[chat_id] = text
                 return
+            except BadRequest as e:
+                # 400 "not modified": el pin ya muestra este texto (inofensivo).
+                if "not modified" in str(e).lower():
+                    self._cupo_text[chat_id] = text
+                    return
+                self._cupo_msg_id.pop(chat_id, None)
+                self._cupo_text.pop(chat_id, None)
             except Exception:
                 self._cupo_msg_id.pop(chat_id, None)
+                self._cupo_text.pop(chat_id, None)
         try:
             sent = await context.bot.send_message(chat_id=chat_id, text=text)
             self._cupo_msg_id[chat_id] = sent.message_id
+            self._cupo_text[chat_id] = text  # Bug G: recordar lo mostrado
             self._pins.save(self._cupo_msg_id)
             # fijar en silencio (genera un service message "fijó ...")
             await context.bot.pin_chat_message(
