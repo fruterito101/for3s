@@ -30,6 +30,13 @@ from for3s_core.mcp_client import GitHubMCPClient
 # disparar el rate-limit en uso normal.
 MAX_TOOL_ROUNDS = 5
 
+# Parte A (anti-rate-limit): segundos a esperar ENTRE vueltas del loop. La
+# suscripción NO expone el rate-limit por-minuto en headers, así que vamos a
+# ciegas → mejor espaciar las llamadas (cada vuelta reenvía schemas pesados).
+# Solo aplica entre vueltas (no antes de la primera) → no ralentiza el caso
+# de 1 sola llamada.
+ESPACIADO_ENTRE_VUELTAS = 3.0
+
 # Whitelist MVP: las tools de LECTURA esenciales. CLAVE (verificado en pruebas):
 # mandar muchos schemas de tool en cada request infla el input y la suscripción
 # devuelve 429 (rate_limit_error) por encima de ~4-5 tools con schemas grandes.
@@ -82,6 +89,10 @@ async def run_tool_loop(
     out = ToolLoopResult(text="")
 
     for vuelta in range(MAX_TOOL_ROUNDS):
+        # Parte A: espaciar las vueltas (no antes de la primera) para no saturar
+        # el rate-limit por-minuto con llamadas tool-use seguidas.
+        if vuelta > 0:
+            await asyncio.sleep(ESPACIADO_ENTRE_VUELTAS)
         # H-F: en la PRIMERA vuelta forzar el uso de tool (tool_choice="any")
         # → el modelo NO puede narrar/inventar, tiene que ejecutar. En las
         # vueltas siguientes vuelve a "auto" para que pueda RESPONDER con el

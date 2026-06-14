@@ -219,8 +219,13 @@ class ClaudeProvider(LLMProvider):
         if tool_choice and tools:
             payload["tool_choice"] = tool_choice
 
-        # estimación gruesa para el gestor de concurrencia
+        # estimación de tokens para el gestor de concurrencia (Parte A anti-RL).
+        # CLAVE: incluir el peso de los SCHEMAS de tools — pesan ~6-10k chars y
+        # se reenvían en CADA vuelta del loop. Antes solo se contaba messages →
+        # el bucket subestimaba → topaba el 429 (rate-limit por-minuto del
+        # tool-use). Ahora el bucket conoce el peso real → espacia bien.
         approx = sum(len(str(m.get("content", ""))) for m in messages) // 3
-        est_in = max(200, approx + len(full_system) // 3)
+        tools_chars = len(str(tools)) if tools else 0
+        est_in = max(200, approx + len(full_system) // 3 + tools_chars // 3)
         data, resp_headers = self._post(payload, est_in=est_in, est_out=max_tokens)
         return data, resp_headers
