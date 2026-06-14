@@ -15,11 +15,14 @@ en aclose()). asyncio nativo, convive con python-telegram-bot.
 
 from __future__ import annotations
 
+import logging
 from contextlib import AsyncExitStack
 from typing import Any
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
+
+logger = logging.getLogger("for3s.mcp")
 
 # Toolsets de lectura para el MVP (R4: GitHub crítico; aquí solo read).
 _MVP_TOOLSETS = "issues,pull_requests,repos"
@@ -59,12 +62,28 @@ class GitHubMCPClient:
         await self._session.initialize()
 
     async def aclose(self) -> None:
-        """Cierra la sesión y baja el contenedor."""
+        """Cierra la sesión y baja el contenedor.
+
+        DEFENSIVO: el AsyncExitStack (anyio cancel scope) se abrió en la tarea
+        de setup(); cerrarlo desde OTRA tarea (ej. el handler de /reiniciar)
+        lanza RuntimeError "Attempted to exit cancel scope in a different task".
+        En ese caso NO explotamos: limpiamos las referencias igual y dejamos que
+        el contenedor (--rm) muera solo cuando el proceso termine o quede
+        huérfano. Así /reiniciar puede descartar la sesión vieja sin romperse.
+        """
         if self._stack is not None:
-            await self._stack.aclose()
-            self._stack = None
-            self._session = None
-            self._tools_cache = None
+            try:
+                await self._stack.aclose()
+            except RuntimeError as exc:
+                # cierre desde otra tarea: no se puede cerrar limpio, pero no
+                # debe tumbar el flujo. Soltamos las referencias igual.
+                logger.warning("aclose del MCP desde otra tarea (no crítico): %s", exc)
+            except Exception:
+                logger.warning("error cerrando el MCP (no crítico)", exc_info=True)
+            finally:
+                self._stack = None
+                self._session = None
+                self._tools_cache = None
 
     async def tools_for_anthropic(self) -> list[dict[str, Any]]:
         """Tools en formato Anthropic: [{name, description, input_schema}]."""

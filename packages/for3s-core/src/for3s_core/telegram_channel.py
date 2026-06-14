@@ -430,9 +430,14 @@ class TelegramChannel:
             await msg.reply_text("⛔ Comando solo para el dueño.")
             return
         await msg.reply_text("🔄 Reinicio suave: reconectando el GitHub MCP…")
+        # Soltar la sesión vieja PRIMERO (las consultas GitHub no la usan
+        # mientras reconecta). aclose() es defensivo: no explota aunque se llame
+        # desde esta tarea distinta a la de setup (bug que rompía el MCP).
+        vieja = self._mcp
+        self._mcp = None
+        if vieja is not None:
+            await vieja.aclose()
         try:
-            if self._mcp is not None:
-                await self._mcp.aclose()
             settings = load_settings()
             pat = await SecretStore(self._pool).get_secret(settings.owner_session, "github_token")
             mcp = GitHubMCPClient(pat, read_only=True)
