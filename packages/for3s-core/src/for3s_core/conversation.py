@@ -33,10 +33,25 @@ MAX_HISTORY_TURNS = 12
 # Detector LIGERO de "¿este mensaje huele a GitHub?" → solo entonces se le dan
 # las tools a Claude (corre el loop MCP). Ahorra rate-limit (el tool-use manda
 # schemas pesados; ver hallazgo Paso 3) y mantiene la charla normal ágil.
-# Conservador: keywords claras de repo/PR/issue/código, o un URL de GitHub.
+#
+# H-F bugfix (2026-06-14): el regex viejo NO matcheaba plurales ("issues",
+# "repos", "commits") por un \b mal puesto, ni nombres de repo ("godinez-studio",
+# "owner/repo"). Por eso "CUANTOS ISSUES tienen godinez-studio" caía a chat
+# normal → el agente inventaba. Ahora: keywords con plural opcional + patrón
+# de nombre-de-repo (palabra-palabra o owner/repo) + URL GitHub.
 _GH_HINT_RE = re.compile(
-    r"\b(github\.com|pull\s*request|\bpr\b|issue|repo(sitorio)?|"
-    r"commit|branch|pull/\d+|issues?/\d+|c[oó]digo|archivo)\b",
+    r"(github\.com"
+    r"|\bpull\s*requests?\b"
+    r"|\bpr\b|\bprs\b"
+    r"|\bissues?\b"
+    r"|\brepos?(itorios?)?\b"
+    r"|\bcommits?\b"
+    r"|\bbranch(es)?\b"
+    r"|\bpull/\d+|\bissues?/\d+"
+    r"|\bc[oó]digo\b|\barchivos?\b"
+    r"|\b[a-z][\w.\-]{2,}/[\w.\-]{2,}\b"  # owner/repo (fruteroclub/godinez-studio)
+    r"|\bgodinez[\w.\-]*\b"               # repos del proyecto (godinez-studio, godinez-ai)
+    r")",
     re.IGNORECASE,
 )
 
