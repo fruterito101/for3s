@@ -1,4 +1,11 @@
-"""Orquestador de análisis de código (H4) — "pega un URL" → reporte QA.
+"""[DEPRECADO 2026-06-14] Orquestador ARTESANAL de analisis (H4).
+
+DEPRECADO: el bot ya NO usa analizar_pr(). La integracion GitHub migro al
+GitHub MCP server (mcp_client + tool_loop + send_with_tools). Se conserva como
+red de seguridad durante el pulido del MVP; se borrara al declararlo pulido.
+
+--- doc original ---
+Orquestador de análisis de código (H4) — "pega un URL" → reporte QA.
 
 Detecta el tipo de recurso de GitHub (PR · gist · archivo blob), lo trae
 (github_tool, token descifrado del SecretStore con KEK), corre lint objetivo

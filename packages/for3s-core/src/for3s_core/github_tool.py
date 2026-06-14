@@ -1,4 +1,13 @@
-"""GitHub tool de For3s OS (H4) — la mano que va a leer Pull Requests.
+"""[DEPRECADO 2026-06-14] GitHub tool ARTESANAL de For3s OS (H4).
+
+DEPRECADO: el bot ya NO usa este modulo. La integracion GitHub migro al
+GitHub MCP server oficial (mcp_client.py + tool_loop.py + send_with_tools),
+donde el MODELO decide las tools en vez del regex de aqui. Se conserva como
+red de seguridad durante el pulido del MVP (comparar/revertir). Se borrara
+cuando el MVP este declarado pulido. Ver: Cuerpo/Ronda_04_Anexo_GitHub_*.md.
+
+--- doc original ---
+GitHub tool de For3s OS (H4) — la mano que va a leer Pull Requests.
 
 Dado un URL de PR, trae por la API de GitHub: título, descripción, metadata,
 archivos cambiados y diff. Manejo de errores NIVEL PRODUCTO: PR inexistente,
