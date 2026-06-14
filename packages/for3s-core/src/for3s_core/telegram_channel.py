@@ -52,6 +52,23 @@ ALERT_THRESHOLD = 0.80
 # Timeouts (segundos) para no quedar congelados en operaciones largas.
 GITHUB_TIMEOUT = 60  # traer el recurso de GitHub (+ lint sandbox)
 ANALYSIS_TIMEOUT = 120  # análisis completo con Claude
+TYPING_REFRESH = 4  # cada cuántos seg re-enviar "escribiendo..." (Telegram lo apaga a los ~5s)
+
+
+async def _mantener_typing(bot, chat_id: int) -> None:
+    """Mantiene VIVO el indicador 'escribiendo...' hasta que se cancele.
+
+    Telegram apaga el typing a los ~5s por cada send_chat_action. Los análisis
+    con MCP tardan 30-60s; sin esto, el indicador desaparece y parece que el
+    bot se colgó (reportado por Brian). Esta tarea re-envía TYPING en bucle;
+    on_message la cancela cuando llega la respuesta.
+    """
+    try:
+        while True:
+            await bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
+            await asyncio.sleep(TYPING_REFRESH)
+    except asyncio.CancelledError:
+        pass  # cancelada al terminar el proceso: salida limpia
 
 
 def md_to_telegram(text: str) -> str:
@@ -328,7 +345,10 @@ class TelegramChannel:
 
         # memoria COMPARTIDA con el CLI (decisión de Brian): sesión del dueño.
         convo = Conversation(self._pool, self._agent, self._owner_session, channel="telegram")
-        await context.bot.send_chat_action(chat_id=msg.chat_id, action=ChatAction.TYPING)
+        # "escribiendo..." PERSISTENTE: tarea en segundo plano que lo mantiene
+        # vivo mientras el agente trabaja (análisis MCP tardan 30-60s). Se
+        # cancela en el finally pase lo que pase, para no dejarla colgada.
+        typing_task = asyncio.create_task(_mantener_typing(context.bot, msg.chat_id))
 
         # Migración MCP (Paso 4-6): si el mensaje HUELE a GitHub y el MCP está
         # disponible, el MODELO decide qué tools de GitHub usar (loop tool-use),
@@ -338,29 +358,33 @@ class TelegramChannel:
         # rate-limit del tool-use — ver hallazgo Paso 3).
         usa_tools = self._mcp is not None and huele_a_github(msg.text)
         try:
-            if usa_tools:
-                resp = await asyncio.wait_for(
-                    convo.send_with_tools(msg.text, self._mcp, max_tokens=2048),
-                    timeout=ANALYSIS_TIMEOUT,
+            try:
+                if usa_tools:
+                    resp = await asyncio.wait_for(
+                        convo.send_with_tools(msg.text, self._mcp, max_tokens=2048),
+                        timeout=ANALYSIS_TIMEOUT,
+                    )
+                else:
+                    resp = await asyncio.wait_for(
+                        convo.send(msg.text, max_tokens=2048),
+                        timeout=ANALYSIS_TIMEOUT,
+                    )
+            except TimeoutError:
+                await msg.reply_text(
+                    "⏱️ El análisis tardó demasiado (más de 2 min). Suele pasar con "
+                    "código muy grande. Intenta con algo más acotado."
                 )
-            else:
-                resp = await asyncio.wait_for(
-                    convo.send(msg.text, max_tokens=2048),
-                    timeout=ANALYSIS_TIMEOUT,
-                )
-        except TimeoutError:
-            await msg.reply_text(
-                "⏱️ El análisis tardó demasiado (más de 2 min). Suele pasar con "
-                "código muy grande. Intenta con algo más acotado."
-            )
-            return
-        except RateLimitExceeded as exc:
-            await msg.reply_text(f"⏳ {exc}")
-            return
-        except Exception:
-            logger.exception("error procesando mensaje")
-            await msg.reply_text("❌ Algo falló procesando tu mensaje. Intenta de nuevo.")
-            return
+                return
+            except RateLimitExceeded as exc:
+                await msg.reply_text(f"⏳ {exc}")
+                return
+            except Exception:
+                logger.exception("error procesando mensaje")
+                await msg.reply_text("❌ Algo falló procesando tu mensaje. Intenta de nuevo.")
+                return
+        finally:
+            # detener el "escribiendo..." pase lo que pase (éxito, error, timeout)
+            typing_task.cancel()
 
         for chunk in split_message(md_to_telegram(resp.text)):
             await msg.reply_text(chunk)
