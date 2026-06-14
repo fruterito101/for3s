@@ -24,9 +24,11 @@ from for3s_core.mcp_client import GitHubMCPClient
 
 # Tope de vueltas tool→result→tool por turno. CADA vuelta = 1 request con tools
 # (payload pesado). La suscripción topa el rate-limit instantáneo si se encadenan
-# muchos requests pesados seguidos (verificado en pruebas Paso 3). 3 vueltas
-# cubren el caso normal (ej: list_issues → issue_read → respuesta) sin abusar.
-MAX_TOOL_ROUNDS = 3
+# muchos requests pesados seguidos (verificado en pruebas Paso 3). 5 vueltas:
+# 3 se quedaban cortas para conteos que paginan (Fallo 2: "cuántos PR cerrados"
+# → list_pull_requests ×4 agotaba el loop). 5 cubre paginación moderada sin
+# disparar el rate-limit en uso normal.
+MAX_TOOL_ROUNDS = 5
 
 # Whitelist MVP: las tools de LECTURA esenciales. CLAVE (verificado en pruebas):
 # mandar muchos schemas de tool en cada request infla el input y la suscripción
@@ -132,10 +134,36 @@ async def run_tool_loop(
             )
         messages.append({"role": "user", "content": tool_results})
 
-    # Se agotaron las rondas sin respuesta final.
+    # Se agotaron las rondas. En vez de un fallback pobre, una ÚLTIMA llamada
+    # SIN tools pidiendo a Claude que responda con lo que YA recabó (Fallo 2:
+    # conteos que paginan agotaban el loop y daban "no logré cerrar"). Así da
+    # una respuesta útil/parcial con los datos que sí trajo.
+    messages.append(
+        {
+            "role": "user",
+            "content": (
+                "Ya no consultes más herramientas. Responde AHORA con la mejor "
+                "respuesta posible usando los datos que ya obtuviste arriba. Si "
+                "el conteo quedó incompleto por tamaño, dilo y da el número "
+                "aproximado o lo que alcanzaste a ver."
+            ),
+        }
+    )
+    try:
+        data, headers = await asyncio.to_thread(
+            provider.complete_with_tools, messages, system=system, tools=None, max_tokens=max_tokens
+        )
+        out.text = "".join(
+            b.get("text", "") for b in data.get("content", []) if b.get("type") == "text"
+        )
+        usage = data.get("usage", {})
+        out.input_tokens += usage.get("input_tokens", 0)
+        out.output_tokens += usage.get("output_tokens", 0)
+    except Exception:
+        pass
     out.text = (
         out.text
-        or "Hice varias consultas a GitHub pero no logré cerrar el análisis. "
-        "¿Puedes precisar qué necesitas?"
+        or "Consulté GitHub pero el resultado fue muy grande para cerrarlo de una. "
+        "¿Puedes acotar (ej. solo abiertos, o un rango)?"
     )
     return out

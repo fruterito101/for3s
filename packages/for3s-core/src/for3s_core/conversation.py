@@ -41,6 +41,18 @@ _GH_HINT_RE = re.compile(
 )
 
 
+# Directiva de tool-use (Fallo 1): el modelo a veces ANUNCIABA "déjame
+# revisar..." sin EJECUTAR la tool. Esta instrucción lo corrige: usar la tool
+# de inmediato y responder con el dato, sin narrar la intención.
+TOOL_DIRECTIVE = (
+    "\n\n[INSTRUCCIÓN: tienes herramientas de GitHub disponibles. Si necesitas "
+    "datos de un repo/PR/issue para responder, LLÁMALAS AHORA directamente — NO "
+    "digas 'déjame revisar' ni 'voy a consultar' sin hacerlo. Ejecuta la "
+    "herramienta y responde con el dato real. Si una herramienta ya te dio el "
+    "resultado, úsalo para responder; no la vuelvas a llamar sin necesidad.]"
+)
+
+
 def huele_a_github(text: str) -> bool:
     """True si el mensaje parece referirse a GitHub/código → activar tools."""
     return bool(_GH_HINT_RE.search(text))
@@ -155,12 +167,15 @@ class Conversation:
         oauth = getattr(self._agent, "_oauth", False)
         if oauth:
             system = ""
+            contenido = f"[{FOR3S_ROLE}]\n\n{message}{TOOL_DIRECTIVE}"
             if messages and messages[-1]["role"] == "user":
-                messages[-1] = {"role": "user", "content": f"[{FOR3S_ROLE}]\n\n{message}"}
+                messages[-1] = {"role": "user", "content": contenido}
             else:
-                messages.append({"role": "user", "content": f"[{FOR3S_ROLE}]\n\n{message}"})
+                messages.append({"role": "user", "content": contenido})
         else:
             system = FOR3S_ROLE
+            if messages and messages[-1]["role"] == "user":
+                messages[-1] = {"role": "user", "content": f"{message}{TOOL_DIRECTIVE}"}
 
         # 3) correr el loop de tool-use (el modelo decide usar GitHub o no)
         result = await run_tool_loop(
