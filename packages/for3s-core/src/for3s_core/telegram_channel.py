@@ -36,9 +36,9 @@ from telegram.ext import (
 from for3s_core import db
 from for3s_core.agent import Agent
 from for3s_core.config import load_settings
-from for3s_core.conversation import Conversation
+from for3s_core.conversation import Conversation, huele_a_github
 from for3s_core.llm import ClaudeProvider, RateLimitExceeded
-from for3s_core.pr_review import analizar_pr
+from for3s_core.mcp_client import GitHubMCPClient
 from for3s_core.secret_store import SecretStore
 
 logger = logging.getLogger("for3s.telegram")
@@ -170,6 +170,7 @@ class TelegramChannel:
         self._pins = pin_store
         self._pool = None
         self._agent: Agent | None = None
+        self._mcp: GitHubMCPClient | None = None  # sesión MCP GitHub (Paso 4-6)
         self._cupo_msg_id: dict[int, int] = pin_store.load()  # persistido entre reinicios
         self._last_cupo: tuple[float | None, float | None] = (
             None,
@@ -190,6 +191,18 @@ class TelegramChannel:
         self._agent = Agent(provider)
         logger.info("cerebro conectado (modelo=%s auth=%s)", settings.model, settings.auth_mode)
 
+        # MCP GitHub (Paso 4-6): sesión persistente, PAT del SecretStore (KEK).
+        # Si falla (Docker abajo, etc.) el bot sigue: degrada a sin-GitHub.
+        try:
+            pat = await SecretStore(self._pool).get_secret(settings.owner_session, "github_token")
+            mcp = GitHubMCPClient(pat, read_only=True)
+            await mcp.start()
+            self._mcp = mcp
+            logger.info("GitHub MCP conectado (read-only)")
+        except Exception:
+            logger.exception("no pude iniciar el GitHub MCP (sigo sin GitHub)")
+            self._mcp = None
+
     async def teardown(self, app: Application) -> None:
         """post_shutdown de PTB: cierra el pool de BD ordenadamente.
 
@@ -202,6 +215,11 @@ class TelegramChannel:
         application se cierran). Decisión (Brian, 2026-06-13): dejarlo, no
         vale la pena un shutdown manual solo por cosmética.
         """
+        if self._mcp is not None:
+            try:
+                await self._mcp.aclose()
+            except Exception:
+                logger.warning("error cerrando el GitHub MCP (no crítico)")
         if self._pool is not None:
             await self._pool.close()
 
@@ -312,40 +330,24 @@ class TelegramChannel:
         convo = Conversation(self._pool, self._agent, self._owner_session, channel="telegram")
         await context.bot.send_chat_action(chat_id=msg.chat_id, action=ChatAction.TYPING)
 
-        # H4: ¿el mensaje trae un recurso de GitHub? → enriquecer con QA.
-        # TODO con TIMEOUT: si tarda demasiado (PR enorme, red lenta) cortamos
-        # y avisamos, en vez de quedar congelados en silencio (bug encontrado
-        # por Brian con el PR #134). asyncio.wait_for garantiza recuperación.
-        # prompt enriquecido (lo que se manda a Claude) ≠ msg.text (lo que se
-        # guarda en memoria). Así un PR de 100k chars NO se guarda como turno.
-        prompt = None
+        # Migración MCP (Paso 4-6): si el mensaje HUELE a GitHub y el MCP está
+        # disponible, el MODELO decide qué tools de GitHub usar (loop tool-use),
+        # en vez del regex artesanal. Si no huele a GitHub (charla normal) o el
+        # MCP está caído, va el flujo de chat normal (send). El segundo cerebro
+        # responde igual; las tools solo se ofrecen cuando tienen sentido (ahorra
+        # rate-limit del tool-use — ver hallazgo Paso 3).
+        usa_tools = self._mcp is not None and huele_a_github(msg.text)
         try:
-            enriched = await asyncio.wait_for(
-                analizar_pr(self._pool, self._owner_session, msg.text),
-                timeout=GITHUB_TIMEOUT,
-            )
-        except TimeoutError:
-            await msg.reply_text(
-                "⏱️ Tardé demasiado trayendo ese recurso de GitHub (¿es muy grande?). "
-                "Intenta con algo más pequeño o un archivo específico."
-            )
-            return
-        except Exception:
-            logger.exception("error trayendo el recurso de GitHub")
-            enriched = None
-        if enriched is not None:
-            if enriched.startswith("__DIRECT__"):  # error legible del tool
-                await msg.reply_text(enriched.removeprefix("__DIRECT__"))
-                return
-            prompt = enriched  # solo para Claude; en memoria queda msg.text
-
-        try:
-            # Nota: el provider es síncrono por dentro. wait_for + to_thread
-            # evitan que un análisis largo congele al bot (R3 lo hará async).
-            resp = await asyncio.wait_for(
-                convo.send(msg.text, max_tokens=2048, prompt=prompt),
-                timeout=ANALYSIS_TIMEOUT,
-            )
+            if usa_tools:
+                resp = await asyncio.wait_for(
+                    convo.send_with_tools(msg.text, self._mcp, max_tokens=2048),
+                    timeout=ANALYSIS_TIMEOUT,
+                )
+            else:
+                resp = await asyncio.wait_for(
+                    convo.send(msg.text, max_tokens=2048),
+                    timeout=ANALYSIS_TIMEOUT,
+                )
         except TimeoutError:
             await msg.reply_text(
                 "⏱️ El análisis tardó demasiado (más de 2 min). Suele pasar con "

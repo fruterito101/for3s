@@ -134,3 +134,72 @@ async def get_last_repo(pool: asyncpg.Pool, session_id: str) -> tuple[str, str] 
         lr = json.loads(lr)
     owner, repo = lr.get("owner"), lr.get("repo")
     return (owner, repo) if owner and repo else None
+
+
+# Mapa: nombre de tool MCP → kind de gh_resources (las que traen UN recurso).
+# Los listados (list_issues/list_pull_requests) NO se persisten como recurso
+# único — traen muchos a medias; el valor está en leer uno (read).
+_TOOL_KIND = {
+    "issue_read": "issue",
+    "pull_request_read": "pr",
+    "get_file_contents": "file",
+}
+
+
+async def save_gh_tool_calls(
+    pool: asyncpg.Pool,
+    *,
+    session_id: str,
+    tool_calls: list[dict],
+    workspace_id: str = "default",
+) -> int:
+    """Persiste en gh_resources/gh_files lo que las tools de GitHub trajeron.
+
+    tool_calls: [{name, args, result}] del loop. Parsea el JSON del result
+    (formato GitHub MCP) y guarda un snapshot. Defensivo: si una tool no se
+    puede parsear, la salta (no rompe el turno). Devuelve cuántos recursos guardó.
+    """
+    guardados = 0
+    for tc in tool_calls:
+        kind = _TOOL_KIND.get(tc.get("name", ""))
+        if kind is None:
+            continue  # listados/búsquedas no se persisten como recurso único
+        try:
+            data = json.loads(tc.get("result") or "{}")
+        except (ValueError, TypeError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        args = tc.get("args", {})
+        owner = args.get("owner") or data.get("owner") or ""
+        repo = args.get("repo") or data.get("repo") or ""
+        number = args.get("issue_number") or args.get("pull_number") or args.get("pullNumber")
+        try:
+            number = int(number) if number is not None else None
+        except (ValueError, TypeError):
+            number = None
+        user = data.get("user")
+        author = user.get("login") if isinstance(user, dict) else data.get("author")
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO gh_resources
+                    (workspace_id, session_id, kind, owner, repo, number, path,
+                     title, author, state, body, raw)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+                """,
+                workspace_id,
+                session_id,
+                kind,
+                owner,
+                repo,
+                number,
+                args.get("path"),
+                data.get("title"),
+                author,
+                data.get("state"),
+                (data.get("body") or "")[:8000],
+                json.dumps(data)[:50_000],
+            )
+        guardados += 1
+    return guardados

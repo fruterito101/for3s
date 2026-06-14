@@ -122,7 +122,7 @@ async def run_tool_loop(
                 result_text = await mcp.call_tool(name, args)
             except Exception as exc:  # tool falló: devolver error legible a Claude
                 result_text = f"Error ejecutando {name}: {exc}"
-            out.tool_calls.append({"name": name, "args": args})
+            out.tool_calls.append({"name": name, "args": args, "result": result_text})
             tool_results.append(
                 {
                     "type": "tool_result",
