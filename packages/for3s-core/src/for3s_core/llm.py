@@ -28,6 +28,7 @@ from for3s_core.concurrency import (
 API_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_VERSION = "2023-06-01"
 OAUTH_BETA = "oauth-2025-04-20"
+CACHING_BETA = "prompt-caching-2024-07-31"  # Parte C: prompt caching (verificado con OAuth)
 
 CLAUDE_CODE_IDENTITY = "You are Claude Code, Anthropic's official CLI for Claude."
 
@@ -102,11 +103,14 @@ class ClaudeProvider(LLMProvider):
 
     def _headers(self) -> dict[str, str]:
         h = {"anthropic-version": ANTHROPIC_VERSION, "content-type": "application/json"}
+        # Parte C: el beta de caching va SIEMPRE (inofensivo si el payload no
+        # usa cache_control; necesario cuando sí). En OAuth se combina con su beta.
         if self._oauth:
             h["authorization"] = f"Bearer {self._token}"
-            h["anthropic-beta"] = OAUTH_BETA
+            h["anthropic-beta"] = f"{OAUTH_BETA},{CACHING_BETA}"
         else:
             h["x-api-key"] = self._token
+            h["anthropic-beta"] = CACHING_BETA
         return h
 
     def _build_system(self, system: str) -> str:
@@ -210,10 +214,25 @@ class ClaudeProvider(LLMProvider):
             "messages": messages,
         }
         full_system = self._build_system(system)
+        # Parte C: PROMPT CACHING. system y tools se reenvían IDÉNTICOS en cada
+        # vuelta del loop → marcarlos cacheables reduce 75-90% el input contado
+        # (verificado con OAuth: cache_creation 1ª vez, cache_read después).
         if full_system:
-            payload["system"] = full_system
+            # system como bloque de texto con cache_control (si supera el mínimo
+            # de ~1024 tokens, Anthropic lo cachea; si no, lo ignora sin error).
+            payload["system"] = [
+                {
+                    "type": "text",
+                    "text": full_system,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ]
         if tools:
-            payload["tools"] = tools
+            # marcar el ÚLTIMO tool con cache_control → cachea TODO el array de
+            # schemas (lo más pesado del payload). Copia para no mutar el original.
+            tools_cache = [dict(t) for t in tools]
+            tools_cache[-1] = {**tools_cache[-1], "cache_control": {"type": "ephemeral"}}
+            payload["tools"] = tools_cache
         # H-F: tool_choice fuerza a usar tool (ej. {"type":"any"}) — evita que
         # el modelo narre/invente en vez de ejecutar. Solo si se pide y hay tools.
         if tool_choice and tools:
