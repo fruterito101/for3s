@@ -29,15 +29,20 @@ logger = logging.getLogger("for3s.specialists")
 # specialist corre como asyncio.task con su propio valor → no se pisan entre sí.
 # Base que el multi-usuario (S10) reusa para aislar lo que ve cada persona.
 _ctx_specialist: contextvars.ContextVar[str] = contextvars.ContextVar(
-    "specialist_actual", default="")
+    "specialist_actual", default=""
+)
 
 # Write tools de GitHub — los specialists son READ-ONLY (mutation guard, capa 6):
 # NINGÚN specialist puede ejecutar estas. Escribir es del usuario/encargado, NO de
 # un agente autónomo. (Lista espejo de WRITE_TOOLS_PERMITIDAS de tool_loop.py.)
-_WRITE_TOOLS = frozenset({
-    "add_issue_comment", "create_issue", "create_pull_request",
-    "create_pull_request_review",
-})
+_WRITE_TOOLS = frozenset(
+    {
+        "add_issue_comment",
+        "create_issue",
+        "create_pull_request",
+        "create_pull_request_review",
+    }
+)
 
 
 def tool_permitida(definicion: SpecialistDefinition, tool: str) -> tuple[bool, str]:
@@ -56,17 +61,21 @@ class SpecialistDefinition:
     """La ficha de un specialist: quién es, qué puede usar, sus límites."""
 
     nombre: str
-    familia: str          # "tecnica" | "general"
-    rol: str              # system prompt: quién es y qué hace
-    tools: tuple[str, ...] = ()   # whitelist de tools permitidas (vacío = sin tools)
-    timeout_seg: int = 120        # tope de tiempo por specialist
-    max_tokens: int = 1500        # presupuesto de tokens (cost control)
+    familia: str  # "tecnica" | "general"
+    rol: str  # system prompt: quién es y qué hace
+    tools: tuple[str, ...] = ()  # whitelist de tools permitidas (vacío = sin tools)
+    timeout_seg: int = 120  # tope de tiempo por specialist
+    max_tokens: int = 1500  # presupuesto de tokens (cost control)
 
 
 # tools de GitHub de solo-lectura (las que ya existen en MVP_TOOLS, sin write)
 _GH_READ = (
-    "list_issues", "list_pull_requests", "get_file_contents",
-    "search_code", "search_issues", "search_pull_requests",
+    "list_issues",
+    "list_pull_requests",
+    "get_file_contents",
+    "search_code",
+    "search_issues",
+    "search_pull_requests",
 )
 
 
@@ -75,36 +84,51 @@ _GH_READ = (
 # ============================================================================
 _TECNICA: list[SpecialistDefinition] = [
     SpecialistDefinition(
-        nombre="code_analyzer", familia="tecnica",
-        rol=("Eres Code Analyzer, experto en analizar QUÉ HACE el código: su "
-             "estructura, lógica, arquitectura y flujo. Explica con claridad qué "
-             "es y cómo funciona. NO inventes: solo afirma lo que viste en el código."),
+        nombre="code_analyzer",
+        familia="tecnica",
+        rol=(
+            "Eres Code Analyzer, experto en analizar QUÉ HACE el código: su "
+            "estructura, lógica, arquitectura y flujo. Explica con claridad qué "
+            "es y cómo funciona. NO inventes: solo afirma lo que viste en el código."
+        ),
         tools=_GH_READ,
     ),
     SpecialistDefinition(
-        nombre="security_auditor", familia="tecnica",
-        rol=("Eres Security Auditor. Tu único foco son las VULNERABILIDADES y riesgos "
-             "de seguridad: inyecciones, secretos expuestos, validación faltante, "
-             "permisos, deps inseguras. Reporta hallazgos concretos, sin alarmismo."),
+        nombre="security_auditor",
+        familia="tecnica",
+        rol=(
+            "Eres Security Auditor. Tu único foco son las VULNERABILIDADES y riesgos "
+            "de seguridad: inyecciones, secretos expuestos, validación faltante, "
+            "permisos, deps inseguras. Reporta hallazgos concretos, sin alarmismo."
+        ),
         tools=_GH_READ,
     ),
     SpecialistDefinition(
-        nombre="test_generator", familia="tecnica",
-        rol=("Eres Test Generator. Evalúas la COBERTURA de tests: qué está probado, "
-             "qué falta, casos borde sin cubrir. Sugiere qué tests añadir y por qué."),
+        nombre="test_generator",
+        familia="tecnica",
+        rol=(
+            "Eres Test Generator. Evalúas la COBERTURA de tests: qué está probado, "
+            "qué falta, casos borde sin cubrir. Sugiere qué tests añadir y por qué."
+        ),
         tools=_GH_READ,
     ),
     SpecialistDefinition(
-        nombre="performance_analyzer", familia="tecnica",
-        rol=("Eres Performance Analyzer. Identificas CUELLOS DE BOTELLA y problemas "
-             "de rendimiento: bucles costosos, queries N+1, I/O bloqueante, memoria. "
-             "Señala dónde y por qué, con su impacto."),
+        nombre="performance_analyzer",
+        familia="tecnica",
+        rol=(
+            "Eres Performance Analyzer. Identificas CUELLOS DE BOTELLA y problemas "
+            "de rendimiento: bucles costosos, queries N+1, I/O bloqueante, memoria. "
+            "Señala dónde y por qué, con su impacto."
+        ),
         tools=_GH_READ,
     ),
     SpecialistDefinition(
-        nombre="doc_writer", familia="tecnica",
-        rol=("Eres Doc Writer. Evalúas y mejoras la DOCUMENTACIÓN: claridad del README, "
-             "comentarios, ejemplos de uso. Señala qué falta documentar y propón mejoras."),
+        nombre="doc_writer",
+        familia="tecnica",
+        rol=(
+            "Eres Doc Writer. Evalúas y mejoras la DOCUMENTACIÓN: claridad del README, "
+            "comentarios, ejemplos de uso. Señala qué falta documentar y propón mejoras."
+        ),
         tools=_GH_READ,
     ),
 ]
@@ -115,41 +139,54 @@ _TECNICA: list[SpecialistDefinition] = [
 # ============================================================================
 _GENERAL: list[SpecialistDefinition] = [
     SpecialistDefinition(
-        nombre="investigador", familia="general",
-        rol=("Eres Investigador. Buscas y SINTETIZAS información relevante: contexto, "
-             "fuentes, datos. Distingues lo que sabes de lo que necesitarías verificar. "
-             "Honesto: si no tienes el dato, lo dices, no lo inventas."),
+        nombre="investigador",
+        familia="general",
+        rol=(
+            "Eres Investigador. Buscas y SINTETIZAS información relevante: contexto, "
+            "fuentes, datos. Distingues lo que sabes de lo que necesitarías verificar. "
+            "Honesto: si no tienes el dato, lo dices, no lo inventas."
+        ),
         tools=("fetch_url",),  # puede leer páginas web públicas
     ),
     SpecialistDefinition(
-        nombre="escritor", familia="general",
-        rol=("Eres Escritor. Redactas y MEJORAS textos (correos, propuestas, documentos, "
-             "contenido): claros, bien estructurados, con el tono adecuado. Propón el "
-             "texto listo para usar."),
+        nombre="escritor",
+        familia="general",
+        rol=(
+            "Eres Escritor. Redactas y MEJORAS textos (correos, propuestas, documentos, "
+            "contenido): claros, bien estructurados, con el tono adecuado. Propón el "
+            "texto listo para usar."
+        ),
     ),
     SpecialistDefinition(
-        nombre="analista", familia="general",
-        rol=("Eres Analista. DESCOMPONES un problema o decisión: pros/contras, opciones, "
-             "implicaciones, qué datos faltan. Das una recomendación razonada, no vaga."),
+        nombre="analista",
+        familia="general",
+        rol=(
+            "Eres Analista. DESCOMPONES un problema o decisión: pros/contras, opciones, "
+            "implicaciones, qué datos faltan. Das una recomendación razonada, no vaga."
+        ),
     ),
     SpecialistDefinition(
-        nombre="planificador", familia="general",
-        rol=("Eres Planificador. ESTRUCTURAS planes y organizas ideas: pasos concretos, "
-             "orden, dependencias, hitos. Conviertes algo difuso en un plan accionable."),
+        nombre="planificador",
+        familia="general",
+        rol=(
+            "Eres Planificador. ESTRUCTURAS planes y organizas ideas: pasos concretos, "
+            "orden, dependencias, hitos. Conviertes algo difuso en un plan accionable."
+        ),
     ),
     SpecialistDefinition(
-        nombre="critico", familia="general",
-        rol=("Eres Crítico/Revisor (el abogado del diablo, constructivo). CUESTIONAS: "
-             "detectas huecos, supuestos no validados, riesgos, qué podría salir mal. "
-             "Tu objetivo es FORTALECER la idea, no destruirla."),
+        nombre="critico",
+        familia="general",
+        rol=(
+            "Eres Crítico/Revisor (el abogado del diablo, constructivo). CUESTIONAS: "
+            "detectas huecos, supuestos no validados, riesgos, qué podría salir mal. "
+            "Tu objetivo es FORTALECER la idea, no destruirla."
+        ),
     ),
 ]
 
 
 # catálogo completo: nombre → definición
-CATALOGO: dict[str, SpecialistDefinition] = {
-    s.nombre: s for s in (_TECNICA + _GENERAL)
-}
+CATALOGO: dict[str, SpecialistDefinition] = {s.nombre: s for s in (_TECNICA + _GENERAL)}
 
 FAMILIAS = ("tecnica", "general")
 
@@ -168,20 +205,24 @@ def get(nombre: str) -> SpecialistDefinition | None:
 # S2 — RUNNER de UN specialist (sin paralelo aún; eso es S4)
 # ============================================================================
 
+
 @dataclass(frozen=True)
 class ResultadoSpecialist:
     """Lo que devuelve un specialist tras analizar su parte."""
 
     nombre: str
     ok: bool
-    texto: str            # su análisis (o el mensaje de error si ok=False)
+    texto: str  # su análisis (o el mensaje de error si ok=False)
     tokens_in: int = 0
     tokens_out: int = 0
     segundos: float = 0.0
 
 
 async def correr_specialist(
-    definicion: SpecialistDefinition, entrada: str, *, provider=None,
+    definicion: SpecialistDefinition,
+    entrada: str,
+    *,
+    provider=None,
 ) -> ResultadoSpecialist:
     """Ejecuta UN specialist sobre `entrada` y devuelve su análisis (S2).
 
@@ -204,6 +245,7 @@ async def correr_specialist(
         if provider is None:
             from for3s_core.config import load_settings
             from for3s_core.llm import ClaudeProvider
+
             s = load_settings()
             provider = ClaudeProvider(token=s.anthropic_token, oauth=s.is_oauth, model=s.model)
 
@@ -211,24 +253,35 @@ async def correr_specialist(
         prompt = f"[{definicion.rol}]\n\n{entrada}"
         resp = await asyncio.wait_for(
             asyncio.to_thread(
-                provider.complete, prompt, system="", max_tokens=definicion.max_tokens,
+                provider.complete,
+                prompt,
+                system="",
+                max_tokens=definicion.max_tokens,
             ),
             timeout=definicion.timeout_seg,
         )
         dt = time.time() - t0
         logger.info(
             "[specialist:%s] ok (%.1fs, in=%d out=%d)",
-            definicion.nombre, dt, resp.input_tokens, resp.output_tokens,
+            definicion.nombre,
+            dt,
+            resp.input_tokens,
+            resp.output_tokens,
         )
         return ResultadoSpecialist(
-            nombre=definicion.nombre, ok=True, texto=resp.text,
-            tokens_in=resp.input_tokens, tokens_out=resp.output_tokens, segundos=dt,
+            nombre=definicion.nombre,
+            ok=True,
+            texto=resp.text,
+            tokens_in=resp.input_tokens,
+            tokens_out=resp.output_tokens,
+            segundos=dt,
         )
     except TimeoutError:
         dt = time.time() - t0
         logger.warning("[specialist:%s] TIMEOUT (%.0fs)", definicion.nombre, dt)
         return ResultadoSpecialist(
-            nombre=definicion.nombre, ok=False,
+            nombre=definicion.nombre,
+            ok=False,
             texto=f"(timeout: {definicion.nombre} tardó más de {definicion.timeout_seg}s)",
             segundos=dt,
         )
@@ -236,7 +289,8 @@ async def correr_specialist(
         dt = time.time() - t0
         logger.warning("[specialist:%s] falló: %s", definicion.nombre, type(e).__name__)
         return ResultadoSpecialist(
-            nombre=definicion.nombre, ok=False,
+            nombre=definicion.nombre,
+            ok=False,
             texto=f"({definicion.nombre} no pudo completar: {type(e).__name__})",
             segundos=dt,
         )

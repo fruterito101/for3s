@@ -57,10 +57,10 @@ MVP_TOOLS = {
     "issue_read",
     "list_pull_requests",
     "pull_request_read",
-    "get_file_contents",      # leer README/archivos → analizar repo completo
-    "search_code",            # buscar en el repo
-    "search_issues",          # CONTAR issues exacto (total_count) en 1 llamada
-    "search_pull_requests",   # CONTAR PRs exacto (total_count) en 1 llamada
+    "get_file_contents",  # leer README/archivos → analizar repo completo
+    "search_code",  # buscar en el repo
+    "search_issues",  # CONTAR issues exacto (total_count) en 1 llamada
+    "search_pull_requests",  # CONTAR PRs exacto (total_count) en 1 llamada
 }
 
 # ─────────────────────── WRITE TOOLS (con confirmación) ───────────────────────
@@ -89,7 +89,7 @@ WRITE_TOOL_SCHEMAS = [
     {
         "name": "add_issue_comment",
         "description": "Comenta en un issue o pull request existente. REQUIERE "
-                       "confirmación del usuario antes de ejecutarse.",
+        "confirmación del usuario antes de ejecutarse.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -104,7 +104,7 @@ WRITE_TOOL_SCHEMAS = [
     {
         "name": "create_issue",
         "description": "Crea un issue nuevo en un repo. REQUIERE confirmación del "
-                       "usuario antes de ejecutarse.",
+        "usuario antes de ejecutarse.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -119,8 +119,8 @@ WRITE_TOOL_SCHEMAS = [
     {
         "name": "create_pull_request",
         "description": "Crea un pull request. REQUIERE confirmación del usuario "
-                       "antes de ejecutarse. NO mergea (eso es destructivo y no "
-                       "está permitido).",
+        "antes de ejecutarse. NO mergea (eso es destructivo y no "
+        "está permitido).",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -137,8 +137,8 @@ WRITE_TOOL_SCHEMAS = [
     {
         "name": "create_pull_request_review",
         "description": "Crea un review/comentario en un PR. REQUIERE confirmación "
-                       "del usuario. Usa event=COMMENT (no APPROVE/REQUEST_CHANGES "
-                       "sin pedirlo explícito).",
+        "del usuario. Usa event=COMMENT (no APPROVE/REQUEST_CHANGES "
+        "sin pedirlo explícito).",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -238,9 +238,7 @@ async def run_tool_loop(
 
         if stop != "tool_use":
             # respuesta final: juntar el texto
-            out.text = "".join(
-                b.get("text", "") for b in content if b.get("type") == "text"
-            )
+            out.text = "".join(b.get("text", "") for b in content if b.get("type") == "text")
             return out
 
         # Claude pidió 1+ tools. Añadir su turno (assistant) tal cual al historial.
@@ -263,16 +261,18 @@ async def run_tool_loop(
             if name in WRITE_TOOLS_PERMITIDAS:
                 if out.accion_pendiente is None:
                     out.accion_pendiente = {"name": name, "args": args}
-                tool_results.append({
-                    "type": "tool_result",
-                    "tool_use_id": tool_id,
-                    "content": (
-                        "ACCIÓN PROPUESTA, NO EJECUTADA. Esta acción de escritura "
-                        "requiere que el usuario la confirme con un botón. NO la "
-                        "repitas ni intentes otra herramienta: responde en UNA "
-                        "frase qué vas a hacer y dile al usuario que confirme abajo."
-                    ),
-                })
+                tool_results.append(
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": tool_id,
+                        "content": (
+                            "ACCIÓN PROPUESTA, NO EJECUTADA. Esta acción de escritura "
+                            "requiere que el usuario la confirme con un botón. NO la "
+                            "repitas ni intentes otra herramienta: responde en UNA "
+                            "frase qué vas a hacer y dile al usuario que confirme abajo."
+                        ),
+                    }
+                )
                 continue
             # 2) Cualquier write/destructive NO permitida (delete_repository,
             #    merge_pull_request, push_files…) → RECHAZO DURO. Nunca se ejecuta.
@@ -284,9 +284,13 @@ async def run_tool_loop(
                     "esto al usuario con honestidad."
                 )
                 out.tool_calls.append({"name": name, "args": args, "result": result_text})
-                tool_results.append({
-                    "type": "tool_result", "tool_use_id": tool_id, "content": result_text,
-                })
+                tool_results.append(
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": tool_id,
+                        "content": result_text,
+                    }
+                )
                 continue
             # 3) READ permitida → cache primero, si no, ejecutar.
             # CACHE (Valkey): si la tool es cacheable y hay hit, servimos de
@@ -308,9 +312,14 @@ async def run_tool_loop(
                         await cache.set(workspace_id, name, args, result_text)
                 except Exception as exc:  # tool falló: error legible a Claude
                     result_text = f"Error ejecutando {name}: {exc}"
-            out.tool_calls.append({
-                "name": name, "args": args, "result": result_text, "cacheado": cacheado,
-            })
+            out.tool_calls.append(
+                {
+                    "name": name,
+                    "args": args,
+                    "result": result_text,
+                    "cacheado": cacheado,
+                }
+            )
             tool_results.append(
                 {
                     "type": "tool_result",

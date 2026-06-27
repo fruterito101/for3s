@@ -40,7 +40,9 @@ VALKEY_PORT = int(os.environ.get("VALKEY_PORT", "6379"))
 VALKEY_DB_SCHEDULER = 1  # ⚠️ NO usar 0 (es del cache de GitHub)
 
 REDIS_SETTINGS = RedisSettings(
-    host=VALKEY_HOST, port=VALKEY_PORT, database=VALKEY_DB_SCHEDULER,
+    host=VALKEY_HOST,
+    port=VALKEY_PORT,
+    database=VALKEY_DB_SCHEDULER,
 )
 
 # --- Config de los jobs nocturnos ------------------------------------------
@@ -54,21 +56,20 @@ from for3s_core.config import _load_dotenv  # noqa: E402
 _load_dotenv(Path.cwd() / ".env")
 
 SESSION_OWNER = os.environ.get("FOR3S_OWNER_SESSION", "brian").strip()
-MICROGLIA_CONFIRMAR = (
-    os.environ.get("FOR3S_MICROGLIA_CONFIRMAR", "false").strip().lower() == "true"
-)
-HORA_BACKUP_UTC = 7     # 01:00 México (ANTES de CLS, red de seguridad)
-HORA_CLS_UTC = 8        # 02:00 México
-HORA_STATUS_UTC = 8     # 02:30 México (AI4, justo DESPUÉS de CLS — usa minute=30)
+MICROGLIA_CONFIRMAR = os.environ.get("FOR3S_MICROGLIA_CONFIRMAR", "false").strip().lower() == "true"
+HORA_BACKUP_UTC = 7  # 01:00 México (ANTES de CLS, red de seguridad)
+HORA_CLS_UTC = 8  # 02:00 México
+HORA_STATUS_UTC = 8  # 02:30 México (AI4, justo DESPUÉS de CLS — usa minute=30)
 HORA_MICROGLIA_UTC = 9  # 03:00 México
 HORA_CURAR_SKILLS_UTC = 9  # 03:30 México (DESPUÉS de Microglía — usa minute=30)
-HORA_DMN_NOCHE_UTC = 10    # 04:00 México (H9 DMN nocturno — DESPUÉS de la curación)
+HORA_DMN_NOCHE_UTC = 10  # 04:00 México (H9 DMN nocturno — DESPUÉS de la curación)
 
 
 async def _get_pool():
     """Crea un pool de BD para el job (lo cierra el caller)."""
     from for3s_core import db
     from for3s_core.config import load_settings
+
     s = load_settings()
     return await db.connect(s.database_url)
 
@@ -86,12 +87,15 @@ async def job_cls(ctx: dict) -> str:
     """Job nocturno CLS (2 AM México): consolida episodios pendientes → conceptos
     al Knowledge Graph. Defensivo: si falla, loguea pero no tumba el worker."""
     from for3s_core import consolidator
+
     pool = None
     try:
         pool = await _get_pool()
         r = await consolidator.consolidar(pool, SESSION_OWNER, dry_run=False)
-        msg = (f"CLS: clusters={r.clusters} conceptos={r.conceptos_escritos} "
-               f"marcados={r.episodios_marcados} (pendientes_eval={r.total_pendientes})")
+        msg = (
+            f"CLS: clusters={r.clusters} conceptos={r.conceptos_escritos} "
+            f"marcados={r.episodios_marcados} (pendientes_eval={r.total_pendientes})"
+        )
         logger.info("[job_cls] %s", msg)
         return msg
     except Exception as e:  # noqa: BLE001 — un fallo nocturno no debe tumbar el worker
@@ -108,6 +112,7 @@ async def job_status(ctx: dict) -> str:
     tumba el worker (generar_status ya traga sus errores por hilo). Espacia las
     llamadas LLM para no topar el rate-limit (anti-429, como CLS)."""
     from for3s_core import hilo_status
+
     pool = None
     try:
         pool = await _get_pool()
@@ -134,6 +139,7 @@ async def job_microglia(ctx: dict) -> str:
     Por defecto DRY-RUN (solo reporta). Borra de verdad solo si MICROGLIA_CONFIRMAR.
     Defensivo."""
     from for3s_core import microglia
+
     pool = None
     try:
         pool = await _get_pool()
@@ -155,6 +161,7 @@ async def job_backup(ctx: dict) -> str:
     rotación de los viejos. Es la red de seguridad antes del olvido. Defensivo."""
     from for3s_core import backup
     from for3s_core.config import load_settings
+
     try:
         s = load_settings()
         ruta, borrados = await asyncio.to_thread(backup.backup_y_rotar, s.database_url)
@@ -172,6 +179,7 @@ async def job_curar_skills(ctx: dict) -> str:
     archived), recuperable. Reusa la filosofía de H6 (degradar, no borrar). NUNCA
     toca skills del usuario ni pinned. Defensivo."""
     from for3s_core.aprende import curar_skills
+
     pool = None
     try:
         pool = await _get_pool()
@@ -194,6 +202,7 @@ async def job_dmn_noche(ctx: dict) -> str:
         dmn,
         dmn_tasks,  # noqa: F401 — registra las housekeeping al importar
     )
+
     pool = None
     try:
         pool = await _get_pool()
@@ -216,6 +225,7 @@ async def job_dmn_idle(ctx: dict) -> str:
         dmn,
         dmn_tasks,  # noqa: F401 — registra las housekeeping al importar
     )
+
     pool = None
     try:
         pool = await _get_pool()
@@ -238,15 +248,23 @@ class WorkerSettings:
     """
 
     redis_settings = REDIS_SETTINGS
-    functions = [ping, job_cls, job_status, job_microglia, job_backup, job_curar_skills,
-                 job_dmn_noche, job_dmn_idle]
+    functions = [
+        ping,
+        job_cls,
+        job_status,
+        job_microglia,
+        job_backup,
+        job_curar_skills,
+        job_dmn_noche,
+        job_dmn_idle,
+    ]
     cron_jobs = [
-        cron(job_backup, hour=HORA_BACKUP_UTC, minute=0),        # 01:00 México (1º)
-        cron(job_cls, hour=HORA_CLS_UTC, minute=0),             # 02:00 México
-        cron(job_status, hour=HORA_STATUS_UTC, minute=30),       # 02:30 México (AI4)
+        cron(job_backup, hour=HORA_BACKUP_UTC, minute=0),  # 01:00 México (1º)
+        cron(job_cls, hour=HORA_CLS_UTC, minute=0),  # 02:00 México
+        cron(job_status, hour=HORA_STATUS_UTC, minute=30),  # 02:30 México (AI4)
         cron(job_microglia, hour=HORA_MICROGLIA_UTC, minute=0),  # 03:00 México
         cron(job_curar_skills, hour=HORA_CURAR_SKILLS_UTC, minute=30),  # 03:30 México (H12 P3)
-        cron(job_dmn_noche, hour=HORA_DMN_NOCHE_UTC, minute=0),   # 04:00 México (H9, todas)
+        cron(job_dmn_noche, hour=HORA_DMN_NOCHE_UTC, minute=0),  # 04:00 México (H9, todas)
         cron(job_dmn_idle, minute={0, 30}),  # H9: cada 30 min, corre solo si está idle (ligeras)
     ]
 
@@ -259,8 +277,11 @@ class WorkerSettings:
         logger.info(
             "[worker] arrancado — Valkey db=%s · CLS %02d:00 UTC · Microglía %02d:00 UTC "
             "(confirmar=%s) · owner=%s",
-            VALKEY_DB_SCHEDULER, HORA_CLS_UTC, HORA_MICROGLIA_UTC,
-            MICROGLIA_CONFIRMAR, SESSION_OWNER,
+            VALKEY_DB_SCHEDULER,
+            HORA_CLS_UTC,
+            HORA_MICROGLIA_UTC,
+            MICROGLIA_CONFIRMAR,
+            SESSION_OWNER,
         )
 
     @staticmethod

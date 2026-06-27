@@ -15,8 +15,8 @@ entrada al inicio de CHANGELOG. Un solo lugar.
 from __future__ import annotations
 
 # ── Versión actual ─────────────────────────────────────────────────────────
-VERSION = "0.12.0"                     # semver (0.x = alpha; H10 PLANEA — metacognición)
-HITO = "H10 PLANEA"                    # hito actual
+VERSION = "0.12.0"  # semver (0.x = alpha; H10 PLANEA — metacognición)
+HITO = "H10 PLANEA"  # hito actual
 HITO_DESC = "metacognición: sé cuándo NO sé (mido mi confianza antes de afirmar)"
 FASE = "H10-PLANEA v1 (confidence scoring + honestidad en baja confianza, en chat)"
 
@@ -25,7 +25,9 @@ FASE = "H10-PLANEA v1 (confidence scoring + honestidad en baja confianza, en cha
 # responder qué cualidades nuevas y viejas tiene.
 CHANGELOG: list[dict] = [
     {
-        "version": "0.12.0", "hito": "H10 PLANEA", "fecha": "2026-06-26",
+        "version": "0.12.0",
+        "hito": "H10 PLANEA",
+        "fecha": "2026-06-26",
         "cambios": [
             "Metacognición: mido mi propia confianza antes de afirmar algo",
             "Sé cuándo NO sé: si dudo, lo digo o pido aclaración (no invento)",
@@ -34,7 +36,9 @@ CHANGELOG: list[dict] = [
         ],
     },
     {
-        "version": "0.11.0", "hito": "H9 SUEÑA", "fecha": "2026-06-26",
+        "version": "0.11.0",
+        "hito": "H9 SUEÑA",
+        "fecha": "2026-06-26",
         "cambios": [
             "DMN: trabajo solo cuando estás inactivo (mantenimiento + auto-mejora)",
             "Housekeeping: pre-computo embeddings, consolido memoria, vigilo mi calidad",
@@ -44,7 +48,9 @@ CHANGELOG: list[dict] = [
         ],
     },
     {
-        "version": "0.10.0", "hito": "H12 APRENDE", "fecha": "2026-06-25",
+        "version": "0.10.0",
+        "hito": "H12 APRENDE",
+        "fecha": "2026-06-25",
         "cambios": [
             "/aprende: For3s destila una skill (receta) de lo que acaban de trabajar",
             "Auto-mejora: tras tareas complejas propone skills (espera tu aprobación)",
@@ -54,7 +60,9 @@ CHANGELOG: list[dict] = [
         ],
     },
     {
-        "version": "0.9.0", "hito": "H11 GOVERNOR", "fecha": "2026-06-25",
+        "version": "0.9.0",
+        "hito": "H11 GOVERNOR",
+        "fecha": "2026-06-25",
         "cambios": [
             "Skills (recetas reutilizables): For3s puede tener y aplicar SKILL.md (/skills)",
             "Governor de skills: escanea toda skill nueva en busca de patrones peligrosos",
@@ -64,7 +72,9 @@ CHANGELOG: list[dict] = [
         ],
     },
     {
-        "version": "0.8.3", "hito": "H8 EQUIPO — pulido", "fecha": "2026-06-23",
+        "version": "0.8.3",
+        "hito": "H8 EQUIPO — pulido",
+        "fecha": "2026-06-23",
         "cambios": [
             "Temas por persona en Telegram (/tema, /temas): un chat = varios hilos separados",
             "Audit trail del equipo multi-agente en BD (cada corrida queda registrada)",
@@ -74,7 +84,9 @@ CHANGELOG: list[dict] = [
         ],
     },
     {
-        "version": "0.8.0", "hito": "H8 EQUIPO", "fecha": "2026-06-23",
+        "version": "0.8.0",
+        "hito": "H8 EQUIPO",
+        "fecha": "2026-06-23",
         "cambios": [
             "Trabajo en EQUIPO multi-agente: 5 specialists en paralelo + síntesis (2 familias)",
             "MULTI-USUARIO: varias personas un mismo agente, roles, puerta /invitar",
@@ -83,28 +95,36 @@ CHANGELOG: list[dict] = [
         ],
     },
     {
-        "version": "0.7.0", "hito": "H7 (parcial) /model", "fecha": "2026-06-23",
+        "version": "0.7.0",
+        "hito": "H7 (parcial) /model",
+        "fecha": "2026-06-23",
         "cambios": [
             "Comando /model: elegir el modelo de IA (Haiku/Sonnet/Opus)",
             "Enrutamiento automático por costo: BLOQUEADO por decisión (suscripción plana)",
         ],
     },
     {
-        "version": "0.6.0", "hito": "H6 SE CUIDA", "fecha": "2026-06-20",
+        "version": "0.6.0",
+        "hito": "H6 SE CUIDA",
+        "fecha": "2026-06-20",
         "cambios": [
             "Se mantiene solo de noche: backup + consolidación (CLS) + olvido (Microglía)",
             "La memoria se organiza y mejora sola mientras nadie la usa",
         ],
     },
     {
-        "version": "0.5.0", "hito": "H5 MEMORIA REAL", "fecha": "2026-06-20",
+        "version": "0.5.0",
+        "hito": "H5 MEMORIA REAL",
+        "fecha": "2026-06-20",
         "cambios": [
             "Memoria semántica: recuerda por SIGNIFICADO en todo el historial",
             "Knowledge Graph (conceptos, repos, issues) que se puebla al leer GitHub",
         ],
     },
     {
-        "version": "0.4.0", "hito": "MVP (H1-H4)", "fecha": "2026-06-19",
+        "version": "0.4.0",
+        "hito": "MVP (H1-H4)",
+        "fecha": "2026-06-19",
         "cambios": [
             "Chat con memoria persistente (Telegram + CLI)",
             "Análisis de repos GitHub + write tools seguras con confirmación",
@@ -129,8 +149,10 @@ def resumen(schema_version: int | None = None) -> str:
     lineas.append(f"• Lo MÁS NUEVO ({nuevo['fecha']}, {nuevo['hito']}):")
     for c in nuevo["cambios"]:
         lineas.append(f"   - {c}")
-    lineas.append("• Hitos completos hasta hoy: H1·H2·H3·H4 (MVP) → H5 (memoria) → "
-                  "H6 (se cuida) → H7 /model → H8 (equipo+multiusuario).")
+    lineas.append(
+        "• Hitos completos hasta hoy: H1·H2·H3·H4 (MVP) → H5 (memoria) → "
+        "H6 (se cuida) → H7 /model → H8 (equipo+multiusuario)."
+    )
     return "\n".join(lineas)
 
 

@@ -189,8 +189,12 @@ class Agent:
         return self._provider.complete(message, system=FOR3S_ROLE, max_tokens=max_tokens)
 
     def ask_with_history(
-        self, history: list[dict[str, str]], *, max_tokens: int = 1024,
-        contexto: str = "", adjuntos: list[dict] | None = None,
+        self,
+        history: list[dict[str, str]],
+        *,
+        max_tokens: int = 1024,
+        contexto: str = "",
+        adjuntos: list[dict] | None = None,
     ) -> LLMResponse:
         """Turno CON memoria (H2): history = [{role, content}, ...] en orden.
 
@@ -221,7 +225,10 @@ class Agent:
                 "Responde al último mensaje del Usuario."
             )
             return self._provider.complete(
-                prompt, system="", max_tokens=max_tokens, adjuntos=adjuntos,
+                prompt,
+                system="",
+                max_tokens=max_tokens,
+                adjuntos=adjuntos,
             )
 
         prompt = (
@@ -229,5 +236,8 @@ class Agent:
         )
         sys_ctx = f"{FOR3S_ROLE}\n\n{contexto}" if contexto else FOR3S_ROLE
         return self._provider.complete(
-            prompt, system=sys_ctx, max_tokens=max_tokens, adjuntos=adjuntos,
+            prompt,
+            system=sys_ctx,
+            max_tokens=max_tokens,
+            adjuntos=adjuntos,
         )

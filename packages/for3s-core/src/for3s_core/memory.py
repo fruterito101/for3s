@@ -30,7 +30,7 @@ class Turn:
 
     role: str  # "user" | "assistant"
     content: str
-    created_at: object = None            # datetime del turno (cuándo se dijo)
+    created_at: object = None  # datetime del turno (cuándo se dijo)
     telegram_user_id: int | None = None  # quién lo dijo (autor; None = sistema/legado)
 
 
@@ -141,8 +141,10 @@ async def load_history(
             )
     return [
         Turn(
-            role=r["role"], content=r["content"],
-            created_at=r["created_at"], telegram_user_id=r["telegram_user_id"],
+            role=r["role"],
+            content=r["content"],
+            created_at=r["created_at"],
+            telegram_user_id=r["telegram_user_id"],
         )
         for r in rows
     ]
@@ -162,9 +164,15 @@ class RecuerdoRelevante:
 
 
 async def buscar_semantico(
-    pool: asyncpg.Pool, session_id: str, query: str, *,
-    top_n: int = 5, excluir_ultimos: int = 0, solo_usuario: bool = False,
-    solo_asistente: bool = False, scope_user_id: int | None = None,
+    pool: asyncpg.Pool,
+    session_id: str,
+    query: str,
+    *,
+    top_n: int = 5,
+    excluir_ultimos: int = 0,
+    solo_usuario: bool = False,
+    solo_asistente: bool = False,
+    scope_user_id: int | None = None,
 ) -> list[RecuerdoRelevante]:
     """Busca en la memoria de la sesión los turnos más parecidos por SIGNIFICADO
     a `query` (no por palabra exacta). Usa el embedding de la query + distancia
@@ -192,6 +200,7 @@ async def buscar_semantico(
     # no al importar el módulo memory (que el bot importa siempre).
     try:
         from for3s_core import embeddings
+
         qvec = embeddings.a_pgvector(embeddings.embed(query))
     except Exception:  # noqa: BLE001 — sin embeddings, degrada a sin recuerdos
         return []
@@ -213,8 +222,7 @@ async def buscar_semantico(
     if scope_user_id is not None:
         params.append(scope_user_id)
         where.append(
-            f"(owner_user_id = ${len(params)} OR equipo_id IS NOT NULL "
-            "OR owner_user_id IS NULL)"
+            f"(owner_user_id = ${len(params)} OR equipo_id IS NOT NULL OR owner_user_id IS NULL)"
         )
     if excluir_ultimos > 0:
         # H6: NO filtrar deleted_at — es aritmética de seq para la ventana reciente;
@@ -228,15 +236,18 @@ async def buscar_semantico(
 
     sql = (
         "SELECT role, content, seq, created_at, embedding <=> $2::vector AS dist "
-        "FROM episodes_events WHERE " + " AND ".join(where) +
-        " ORDER BY dist LIMIT $3"
+        "FROM episodes_events WHERE " + " AND ".join(where) + " ORDER BY dist LIMIT $3"
     )
     async with pool.acquire() as conn:
         rows = await conn.fetch(sql, *params)
     recuerdos = [
-        RecuerdoRelevante(role=r["role"], content=r["content"],
-                          seq=r["seq"], distancia=float(r["dist"]),
-                          created_at=r["created_at"])
+        RecuerdoRelevante(
+            role=r["role"],
+            content=r["content"],
+            seq=r["seq"],
+            distancia=float(r["dist"]),
+            created_at=r["created_at"],
+        )
         for r in rows
     ]
     # H6 Sub-paso 3: refrescar last_accessed de los recuerdos recuperados, en
@@ -248,7 +259,10 @@ async def buscar_semantico(
 
 
 async def embeddear_turno(
-    pool: asyncpg.Pool, session_id: str, seq: int, content: str,
+    pool: asyncpg.Pool,
+    session_id: str,
+    seq: int,
+    content: str,
 ) -> bool:
     """Genera el embedding de UN turno ya guardado y lo escribe en su columna
     (H5 sub-paso 8 pieza B). Pensada para correr en BACKGROUND (fire-and-forget):
@@ -264,6 +278,7 @@ async def embeddear_turno(
     """
     try:
         from for3s_core import embeddings
+
         if not (content or "").strip():
             return False  # nada que embeber (turno vacío)
         # embed es CPU-intensivo y síncrono → a un thread para no bloquear el loop
@@ -273,7 +288,9 @@ async def embeddear_turno(
             await conn.execute(
                 "UPDATE episodes_events SET embedding = $1::vector "
                 "WHERE session_id = $2 AND seq = $3",
-                pgvec, session_id, seq,
+                pgvec,
+                session_id,
+                seq,
             )
         return True
     except Exception:  # noqa: BLE001 — background secundario, jamás rompe el turno
@@ -281,7 +298,9 @@ async def embeddear_turno(
 
 
 async def tocar_recuerdos(
-    pool: asyncpg.Pool, session_id: str, seqs: list[int],
+    pool: asyncpg.Pool,
+    session_id: str,
+    seqs: list[int],
 ) -> int:
     """Marca last_accessed=now() y SUMA 1 a veces_recuperado para los episodios (seq)
     recuperados como recuerdo (H6 Sub-paso 3 + relevance v2). "Usar" un recuerdo lo
@@ -299,7 +318,8 @@ async def tocar_recuerdos(
                 "UPDATE episodes_events SET last_accessed = now(), "
                 "veces_recuperado = veces_recuperado + 1 "
                 "WHERE session_id = $1 AND seq = ANY($2::int[]) AND deleted_at IS NULL",
-                session_id, seqs,
+                session_id,
+                seqs,
             )
         try:
             return int(result.split()[-1])
@@ -310,7 +330,9 @@ async def tocar_recuerdos(
 
 
 async def marcar_consolidados(
-    pool: asyncpg.Pool, session_id: str, seqs: list[int],
+    pool: asyncpg.Pool,
+    session_id: str,
+    seqs: list[int],
 ) -> int:
     """Marca consolidated_to_kg=true para los episodios (seq) cuya lección YA quedó
     escrita en el grafo (H6 Sub-paso 7, lo llama el orquestador CLS).
@@ -326,7 +348,8 @@ async def marcar_consolidados(
         result = await conn.execute(
             "UPDATE episodes_events SET consolidated_to_kg = true "
             "WHERE session_id = $1 AND seq = ANY($2::int[]) AND deleted_at IS NULL",
-            session_id, seqs,
+            session_id,
+            seqs,
         )
     try:
         return int(result.split()[-1])
@@ -378,7 +401,10 @@ async def get_last_repo(pool: asyncpg.Pool, session_id: str) -> tuple[str, str] 
 
 
 async def repos_analizados(
-    pool: asyncpg.Pool, session_id: str, *, limite: int = 30,
+    pool: asyncpg.Pool,
+    session_id: str,
+    *,
+    limite: int = 30,
 ) -> list[tuple[str, str]]:
     """G6 (2026-06-24): lista los repos REALES analizados en este hilo, leídos
     de gh_resources (el registro de lo que las tools de GitHub trajeron). Cierra el
@@ -391,7 +417,8 @@ async def repos_analizados(
                 "WHERE session_id = $1 AND owner IS NOT NULL AND owner <> '' "
                 "AND repo IS NOT NULL AND repo <> '' "
                 "GROUP BY owner, repo ORDER BY u DESC LIMIT $2",
-                session_id, limite,
+                session_id,
+                limite,
             )
         return [(r["owner"], r["repo"]) for r in rows]
     except Exception:  # noqa: BLE001 — listar repos nunca rompe el turno
@@ -399,8 +426,12 @@ async def repos_analizados(
 
 
 async def set_progreso_pendiente(
-    pool: asyncpg.Pool, session_id: str, owner: str, repo: str,
-    faltantes: list[str], profundo: bool,
+    pool: asyncpg.Pool,
+    session_id: str,
+    owner: str,
+    repo: str,
+    faltantes: list[str],
+    profundo: bool,
 ) -> None:
     """Guarda el progreso de un mapeo que se CORTÓ por tiempo (2026-06-17):
     el repo + los archivos que NO se alcanzaron a leer. Permite que 'continúa'
@@ -412,8 +443,9 @@ async def set_progreso_pendiente(
             "UPDATE sessions SET meta = jsonb_set(meta, '{progreso_pendiente}', $2::jsonb)"
             " WHERE id = $1",
             session_id,
-            json.dumps({"owner": owner, "repo": repo,
-                        "faltantes": faltantes[:200], "profundo": profundo}),
+            json.dumps(
+                {"owner": owner, "repo": repo, "faltantes": faltantes[:200], "profundo": profundo}
+            ),
         )
 
 
@@ -501,8 +533,10 @@ async def save_gh_tool_calls(
                 number = None
         if kind in ("list", "search"):
             # resumen legible del listado/búsqueda (cuántos resultados trajo)
-            n_items = len(data) if isinstance(data, list) else (
-                len(data.get("items", [])) if isinstance(data, dict) else 0
+            n_items = (
+                len(data)
+                if isinstance(data, list)
+                else (len(data.get("items", [])) if isinstance(data, dict) else 0)
             )
             title = f"{tc.get('name')} → {n_items} resultados"
             path = args.get("path")
@@ -550,6 +584,7 @@ async def save_gh_tool_calls(
         if owner and repo:
             try:
                 from for3s_core import kg
+
                 await kg.registrar_repo(pool, owner, repo)
                 if kind in ("issue", "pr") and number is not None:
                     await kg.registrar_recurso(pool, owner, repo, kind, number, title or "")
@@ -569,8 +604,13 @@ _MAX_RESUMEN = 2000
 
 
 async def save_consulted_file(
-    pool: asyncpg.Pool, *, session_id: str, tipo: str, nombre: str,
-    resumen: str = "", workspace_id: str = "default",
+    pool: asyncpg.Pool,
+    *,
+    session_id: str,
+    tipo: str,
+    nombre: str,
+    resumen: str = "",
+    workspace_id: str = "default",
 ) -> None:
     """Guarda un archivo consultado: tipo + nombre + resumen + cuándo. SIN el
     binario. Defensivo: cualquier error se traga (no debe tumbar el turno)."""
@@ -580,15 +620,24 @@ async def save_consulted_file(
             await conn.execute(
                 "INSERT INTO consulted_files (workspace_id, session_id, tipo, nombre, resumen) "
                 "VALUES ($1, $2, $3, $4, $5)",
-                workspace_id, session_id, tipo, nombre, (resumen or "")[:_MAX_RESUMEN],
+                workspace_id,
+                session_id,
+                tipo,
+                nombre,
+                (resumen or "")[:_MAX_RESUMEN],
             )
     except Exception:  # noqa: BLE001 — registro secundario, no crítico
         pass
 
 
 async def save_consulted_web(
-    pool: asyncpg.Pool, *, session_id: str, url: str, titulo: str = "",
-    descripcion: str = "", workspace_id: str = "default",
+    pool: asyncpg.Pool,
+    *,
+    session_id: str,
+    url: str,
+    titulo: str = "",
+    descripcion: str = "",
+    workspace_id: str = "default",
 ) -> None:
     """Guarda una página web consultada: url + título + descripción + cuándo.
     SIN el HTML. Defensivo: cualquier error se traga."""
@@ -598,7 +647,10 @@ async def save_consulted_web(
             await conn.execute(
                 "INSERT INTO consulted_web (workspace_id, session_id, url, titulo, descripcion) "
                 "VALUES ($1, $2, $3, $4, $5)",
-                workspace_id, session_id, url, (titulo or "")[:500],
+                workspace_id,
+                session_id,
+                url,
+                (titulo or "")[:500],
                 (descripcion or "")[:_MAX_RESUMEN],
             )
     except Exception:  # noqa: BLE001

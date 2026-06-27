@@ -43,7 +43,7 @@ class ResultadoAprende:
     """Qué pasó al intentar aprender una skill."""
 
     ok: bool
-    mensaje: str               # explicación legible para el dueño
+    mensaje: str  # explicación legible para el dueño
     skill_id: int | None = None
     nombre: str = ""
     categoria: str = ""
@@ -109,7 +109,7 @@ def _primer_objeto(t: str) -> str | None:
         elif t[i] == "}":
             nivel -= 1
             if nivel == 0:
-                return t[inicio:i + 1]
+                return t[inicio : i + 1]
     return None
 
 
@@ -131,19 +131,22 @@ async def _destilar(provider, material: str) -> dict | None:
     """Llama al LLM (OAuth-safe) para destilar la skill. Devuelve el dict parseado
     o None si no se pudo. Síncrono complete() en hilo aparte para no bloquear."""
     import asyncio
+
     prompt = _INSTRUCCION + material
     try:
         # complete() es síncrono (httpx) → a thread para no bloquear el event loop.
         resp = await asyncio.to_thread(
-            provider.complete, prompt, system="", max_tokens=MAX_TOKENS_DESTILAR)
+            provider.complete, prompt, system="", max_tokens=MAX_TOKENS_DESTILAR
+        )
     except Exception:  # noqa: BLE001 — el LLM puede fallar (429/red); se reporta arriba
         logger.warning("destilación: el LLM falló", exc_info=True)
         return None
     return _extraer_json(getattr(resp, "text", "") or "")
 
 
-async def _guardar_con_governor(pool, datos: dict, *, provenance: str,
-                                creada_por: int | None) -> ResultadoAprende:
+async def _guardar_con_governor(
+    pool, datos: dict, *, provenance: str, creada_por: int | None
+) -> ResultadoAprende:
     """Pasa la skill destilada por el GOVERNOR (H11) y, si pasa, la guarda.
 
     provenance='usuario' → scanner + duplicado (directo, lo pidió un humano).
@@ -163,31 +166,44 @@ async def _guardar_con_governor(pool, datos: dict, *, provenance: str,
 
     gov = SkillEcosystemGovernor(pool)
     veredicto = await gov.evaluar_skill_nueva(
-        nombre=nombre, contenido=contenido, categoria=categoria,
-        descripcion=descripcion, provenance=provenance, creada_por=creada_por)
+        nombre=nombre,
+        contenido=contenido,
+        categoria=categoria,
+        descripcion=descripcion,
+        provenance=provenance,
+        creada_por=creada_por,
+    )
     if not veredicto:
         detalle = (" (" + "; ".join(veredicto.detalle) + ")") if veredicto.detalle else ""
         return ResultadoAprende(
-            False, f"El governor bloqueó la skill [{veredicto.freno}]: "
-                   f"{veredicto.motivo}{detalle}")
+            False, f"El governor bloqueó la skill [{veredicto.freno}]: {veredicto.motivo}{detalle}"
+        )
 
     ss = SkillStore(pool)
-    sid = await ss.crear(nombre, contenido, categoria=categoria, descripcion=descripcion,
-                         tags=tags, provenance=provenance, creada_por=creada_por)
+    sid = await ss.crear(
+        nombre,
+        contenido,
+        categoria=categoria,
+        descripcion=descripcion,
+        tags=tags,
+        provenance=provenance,
+        creada_por=creada_por,
+    )
     return ResultadoAprende(
-        True, f"Skill '{nombre}' aprendida.", skill_id=sid, nombre=nombre,
-        categoria=categoria)
+        True, f"Skill '{nombre}' aprendida.", skill_id=sid, nombre=nombre, categoria=categoria
+    )
 
 
 # ───────────────────────── P1: /aprende manual ─────────────────────────
-async def aprender_de_conversacion(pool, provider, session_id: str, *,
-                                   creada_por: int | None = None,
-                                   foco: str = "") -> ResultadoAprende:
+async def aprender_de_conversacion(
+    pool, provider, session_id: str, *, creada_por: int | None = None, foco: str = ""
+) -> ResultadoAprende:
     """P1 — el dueño hace /aprende: destila una skill de la conversación actual.
 
     provenance='usuario' (lo pidió un humano → directo, sin gate), pero SIEMPRE
     pasa por el scanner del governor (la charla podría contener un secreto)."""
     from for3s_core import memory
+
     turnos = await memory.load_history(pool, session_id, last_n=TURNOS_FUENTE)
     if not turnos:
         return ResultadoAprende(False, "No hay conversación reciente de la que aprender.")
@@ -195,18 +211,20 @@ async def aprender_de_conversacion(pool, provider, session_id: str, *,
     datos = await _destilar(provider, material)
     if not datos:
         return ResultadoAprende(
-            False, "No pude destilar la skill (el modelo no devolvió algo válido). "
-                   "Inténtalo de nuevo en un momento.")
+            False,
+            "No pude destilar la skill (el modelo no devolvió algo válido). "
+            "Inténtalo de nuevo en un momento.",
+        )
     if not datos.get("vale", False):
         motivo = datos.get("motivo", "no había una receta reutilizable clara")
         return ResultadoAprende(False, f"No vi una skill que valga aquí: {motivo}.")
-    return await _guardar_con_governor(
-        pool, datos, provenance="usuario", creada_por=creada_por)
+    return await _guardar_con_governor(pool, datos, provenance="usuario", creada_por=creada_por)
 
 
 # ───────────────────────── P2: auto-mejora en background ─────────────────────────
-async def proponer_skill_auto(pool, provider, session_id: str, *,
-                              creada_por: int | None = None) -> ResultadoAprende:
+async def proponer_skill_auto(
+    pool, provider, session_id: str, *, creada_por: int | None = None
+) -> ResultadoAprende:
     """P2 — auto-mejora: tras una tarea compleja, For3s se pregunta solo si vale
     guardar una skill. provenance='auto' → frenos COMPLETOS del governor (incluido
     el kill switch). Solo actúa si /autogen está ON; si está OFF, can_generate niega
@@ -217,6 +235,7 @@ async def proponer_skill_auto(pool, provider, session_id: str, *,
     está OFF por defecto, así que en la práctica esto no genera hasta que el dueño
     lo encienda explícitamente."""
     from for3s_core.governor import SkillEcosystemGovernor
+
     gov = SkillEcosystemGovernor(pool)
     # Freno duro de entrada: si la auto-generación está apagada, ni siquiera destilamos
     # (ahorra tokens y respeta el kill switch).
@@ -225,6 +244,7 @@ async def proponer_skill_auto(pool, provider, session_id: str, *,
         return ResultadoAprende(False, f"Auto-generación frenada: {puede.motivo}")
 
     from for3s_core import memory
+
     turnos = await memory.load_history(pool, session_id, last_n=TURNOS_FUENTE)
     if not turnos:
         return ResultadoAprende(False, "Sin material para auto-aprender.")
@@ -232,18 +252,15 @@ async def proponer_skill_auto(pool, provider, session_id: str, *,
     if not datos or not datos.get("vale", False):
         return ResultadoAprende(False, "No salió una skill que valga (auto).")
 
-    res = await _guardar_con_governor(
-        pool, datos, provenance="auto", creada_por=creada_por)
+    res = await _guardar_con_governor(pool, datos, provenance="auto", creada_por=creada_por)
     # Si pasó el governor, la skill auto NACE en 'stale' (NO se inyecta al chat
     # todavía) y va al GATE del dueño: aprobar→active, rechazar→archived. Así nada
     # auto-generado entra en uso sin el visto bueno humano.
     if res.ok and res.skill_id is not None:
         async with pool.acquire() as con:
-            await con.execute("UPDATE skills SET lifecycle='stale' WHERE id=$1",
-                              res.skill_id)
+            await con.execute("UPDATE skills SET lifecycle='stale' WHERE id=$1", res.skill_id)
         res.requiere_gate = True
-        res.mensaje = (f"For3s propone una skill nueva: '{res.nombre}'. "
-                       "Espera tu aprobación.")
+        res.mensaje = f"For3s propone una skill nueva: '{res.nombre}'. Espera tu aprobación."
     return res
 
 
@@ -255,7 +272,8 @@ async def aprobar_skill(pool, skill_id: int) -> str | None:
         nombre = await con.fetchval(
             "UPDATE skills SET lifecycle='active', actualizada_at=now() "
             "WHERE id=$1 AND provenance='auto' AND lifecycle='stale' RETURNING nombre",
-            skill_id)
+            skill_id,
+        )
     return nombre
 
 
@@ -266,7 +284,8 @@ async def rechazar_skill(pool, skill_id: int) -> str | None:
         nombre = await con.fetchval(
             "UPDATE skills SET lifecycle='archived', actualizada_at=now() "
             "WHERE id=$1 AND provenance='auto' AND lifecycle='stale' RETURNING nombre",
-            skill_id)
+            skill_id,
+        )
     return nombre
 
 
@@ -274,7 +293,7 @@ async def rechazar_skill(pool, skill_id: int) -> str | None:
 # El "curator": de noche, las skills AUTO que no se usan se degradan poco a poco,
 # recuperable (nunca hard-delete). Las del USUARIO y las PINNED son intocables.
 # Umbrales (mismo espíritu que la Microglía de H6): generoso, no agresivo.
-DIAS_ACTIVE_A_STALE = 30    # auto activa sin uso 30d → stale (descansa, ya no se inyecta)
+DIAS_ACTIVE_A_STALE = 30  # auto activa sin uso 30d → stale (descansa, ya no se inyecta)
 DIAS_STALE_A_ARCHIVED = 90  # auto stale sin uso 90d → archivada (recuperable)
 
 
@@ -310,28 +329,38 @@ async def curar_skills(pool, *, confirmar: bool = True) -> ResultadoCuracion:
                     "WHERE provenance='auto' AND lifecycle='active' AND NOT pinned "
                     "AND veces_usada=0 AND ultimo_uso IS NULL "
                     "AND actualizada_at < now() - make_interval(days => $1)",
-                    DIAS_ACTIVE_A_STALE)
+                    DIAS_ACTIVE_A_STALE,
+                )
                 r2 = await con.execute(
                     "UPDATE skills SET lifecycle='archived', actualizada_at=now() "
                     "WHERE provenance='auto' AND lifecycle='stale' AND NOT pinned "
                     "AND veces_usada=0 AND ultimo_uso IS NULL "
                     "AND actualizada_at < now() - make_interval(days => $1)",
-                    DIAS_STALE_A_ARCHIVED)
+                    DIAS_STALE_A_ARCHIVED,
+                )
                 res.a_stale = int(r1.split()[-1]) if r1 else 0
                 res.a_archived = int(r2.split()[-1]) if r2 else 0
             else:  # DRY-RUN: solo cuenta
-                res.a_stale = await con.fetchval(
-                    "SELECT count(*) FROM skills WHERE provenance='auto' "
-                    "AND lifecycle='active' AND NOT pinned AND veces_usada=0 "
-                    "AND ultimo_uso IS NULL "
-                    "AND actualizada_at < now() - make_interval(days => $1)",
-                    DIAS_ACTIVE_A_STALE) or 0
-                res.a_archived = await con.fetchval(
-                    "SELECT count(*) FROM skills WHERE provenance='auto' "
-                    "AND lifecycle='stale' AND NOT pinned AND veces_usada=0 "
-                    "AND ultimo_uso IS NULL "
-                    "AND actualizada_at < now() - make_interval(days => $1)",
-                    DIAS_STALE_A_ARCHIVED) or 0
+                res.a_stale = (
+                    await con.fetchval(
+                        "SELECT count(*) FROM skills WHERE provenance='auto' "
+                        "AND lifecycle='active' AND NOT pinned AND veces_usada=0 "
+                        "AND ultimo_uso IS NULL "
+                        "AND actualizada_at < now() - make_interval(days => $1)",
+                        DIAS_ACTIVE_A_STALE,
+                    )
+                    or 0
+                )
+                res.a_archived = (
+                    await con.fetchval(
+                        "SELECT count(*) FROM skills WHERE provenance='auto' "
+                        "AND lifecycle='stale' AND NOT pinned AND veces_usada=0 "
+                        "AND ultimo_uso IS NULL "
+                        "AND actualizada_at < now() - make_interval(days => $1)",
+                        DIAS_STALE_A_ARCHIVED,
+                    )
+                    or 0
+                )
     except Exception:  # noqa: BLE001 — la curación nunca debe tumbar el worker
         logger.warning("curación de skills falló (ignoro)", exc_info=True)
     return res

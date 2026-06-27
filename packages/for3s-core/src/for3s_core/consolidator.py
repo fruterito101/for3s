@@ -29,7 +29,7 @@ import asyncpg
 logger = logging.getLogger("for3s.cls")
 
 # Parámetros LOCKED (R2 §2.6)
-MIN_CLUSTER_SIZE = 3       # un cluster necesita ≥3 episodios parecidos
+MIN_CLUSTER_SIZE = 3  # un cluster necesita ≥3 episodios parecidos
 THRESHOLD_PENDIENTES = 10  # si hay <10 pendientes, no vale la pena consolidar
 
 # Modelo LLM para extraer conceptos. Configurable por env (FOR3S_CLS_MODEL).
@@ -46,9 +46,9 @@ _CHARS_POR_EJEMPLO = 200
 class Cluster:
     """Un grupo de episodios parecidos por significado, candidato a un concepto."""
 
-    seqs: list[int]          # los seq de los episodios del grupo
-    contents: list[str]      # sus textos (para construir el summary en Sub-paso 5)
-    tam: int                 # cuántos episodios
+    seqs: list[int]  # los seq de los episodios del grupo
+    contents: list[str]  # sus textos (para construir el summary en Sub-paso 5)
+    tam: int  # cuántos episodios
 
 
 @dataclass(frozen=True)
@@ -56,13 +56,15 @@ class ResultadoClustering:
     """Salida del clustering: los grupos formados + diagnóstico."""
 
     clusters: list[Cluster]
-    total_pendientes: int    # cuántos episodios pendientes se evaluaron
-    n_ruido: int             # cuántos quedaron SIN cluster (etiqueta -1, normal)
-    salto: bool              # True si se saltó por <THRESHOLD_PENDIENTES
+    total_pendientes: int  # cuántos episodios pendientes se evaluaron
+    n_ruido: int  # cuántos quedaron SIN cluster (etiqueta -1, normal)
+    salto: bool  # True si se saltó por <THRESHOLD_PENDIENTES
 
 
 async def _cargar_pendientes(
-    pool: asyncpg.Pool, session_id: str, limite: int,
+    pool: asyncpg.Pool,
+    session_id: str,
+    limite: int,
 ) -> list[asyncpg.Record]:
     """Lee episodios PENDIENTES de consolidar (no consolidados, vivos, con embedding)."""
     async with pool.acquire() as conn:
@@ -71,7 +73,8 @@ async def _cargar_pendientes(
             "WHERE session_id = $1 AND consolidated_to_kg = false "
             "AND deleted_at IS NULL AND embedding IS NOT NULL "
             "ORDER BY seq ASC LIMIT $2",
-            session_id, limite,
+            session_id,
+            limite,
         )
 
 
@@ -83,7 +86,10 @@ def _parse_vector(emb) -> list[float]:
 
 
 async def clusterizar_pendientes(
-    pool: asyncpg.Pool, session_id: str, *, max_per_run: int = 500,
+    pool: asyncpg.Pool,
+    session_id: str,
+    *,
+    max_per_run: int = 500,
 ) -> ResultadoClustering:
     """Agrupa por SIGNIFICADO los episodios pendientes de consolidar (Sub-paso 4).
 
@@ -132,7 +138,9 @@ async def clusterizar_pendientes(
 
     logger.info(
         "[cls] %d pendientes → %d clusters, %d en ruido",
-        total, len(clusters), n_ruido,
+        total,
+        len(clusters),
+        n_ruido,
     )
     return ResultadoClustering(clusters, total, n_ruido, salto=False)
 
@@ -141,23 +149,66 @@ async def clusterizar_pendientes(
 # Sub-paso 5 — EXTRACCIÓN DE CONCEPTO (LLM focaliza, con privacidad y fallback)
 # ===========================================================================
 
+
 @dataclass(frozen=True)
 class Concepto:
     """El concepto destilado de un cluster — lo que el Sub-paso 6 escribe al grafo."""
 
-    label: str           # nombre corto del concepto (ej. "Análisis de repos GitHub")
-    descripcion: str     # 1-2 frases que resumen el patrón
-    tipo: str            # categoría libre (ej. "tema", "actividad", "saludo")
-    seqs: list[int]      # episodios fuente (para las aristas DERIVED_FROM)
-    via_llm: bool        # True si lo extrajo el LLM; False si fue fallback heurístico
+    label: str  # nombre corto del concepto (ej. "Análisis de repos GitHub")
+    descripcion: str  # 1-2 frases que resumen el patrón
+    tipo: str  # categoría libre (ej. "tema", "actividad", "saludo")
+    seqs: list[int]  # episodios fuente (para las aristas DERIVED_FROM)
+    via_llm: bool  # True si lo extrajo el LLM; False si fue fallback heurístico
 
 
 # Palabras vacías mínimas para el fallback heurístico (es-en, sin dependencias).
 _STOP = {
-    "the", "a", "an", "de", "la", "el", "los", "las", "y", "o", "que", "en", "un",
-    "una", "es", "con", "por", "para", "se", "su", "lo", "al", "del", "me", "te",
-    "mi", "tu", "este", "esta", "esto", "como", "más", "pero", "ya", "si", "no",
-    "hola", "ok", "of", "to", "and", "in", "is", "it", "you", "i",
+    "the",
+    "a",
+    "an",
+    "de",
+    "la",
+    "el",
+    "los",
+    "las",
+    "y",
+    "o",
+    "que",
+    "en",
+    "un",
+    "una",
+    "es",
+    "con",
+    "por",
+    "para",
+    "se",
+    "su",
+    "lo",
+    "al",
+    "del",
+    "me",
+    "te",
+    "mi",
+    "tu",
+    "este",
+    "esta",
+    "esto",
+    "como",
+    "más",
+    "pero",
+    "ya",
+    "si",
+    "no",
+    "hola",
+    "ok",
+    "of",
+    "to",
+    "and",
+    "in",
+    "is",
+    "it",
+    "you",
+    "i",
 }
 
 
@@ -236,15 +287,21 @@ async def extraer_concepto(cluster: Cluster, provider=None) -> Concepto:
         if provider is None:
             from for3s_core.config import load_settings
             from for3s_core.llm import ClaudeProvider
+
             s = load_settings()
             provider = ClaudeProvider(
-                token=s.anthropic_token, oauth=s.is_oauth, model=CLS_MODEL,
+                token=s.anthropic_token,
+                oauth=s.is_oauth,
+                model=CLS_MODEL,
             )
         summary = _construir_summary(cluster)
         # OAUTH-SAFE: instrucción + summary van juntos en el USER message; system="".
         prompt = _INSTRUCCION_CONCEPTO + summary
         resp = await asyncio.to_thread(
-            provider.complete, prompt, system="", max_tokens=150,
+            provider.complete,
+            prompt,
+            system="",
+            max_tokens=150,
         )
         concepto = _parse_concepto_json(resp.text, cluster)
         if concepto is not None:
@@ -260,6 +317,7 @@ async def extraer_concepto(cluster: Cluster, provider=None) -> Concepto:
 # Sub-paso 6 — ESCRIBIR el concepto al Knowledge Graph (reusa kg.py)
 # ===========================================================================
 
+
 async def escribir_concepto(pool, concepto: Concepto) -> bool:
     """Escribe un Concepto en el grafo (nodo + aristas DERIVED_FROM a sus episodios
     fuente), reusando kg.registrar_concepto. Idempotente (MERGE). Defensivo.
@@ -268,8 +326,13 @@ async def escribir_concepto(pool, concepto: Concepto) -> bool:
     TODO el pipeline del cluster completó). Aquí solo escribe al grafo.
     """
     from for3s_core import kg
+
     return await kg.registrar_concepto(
-        pool, concepto.label, concepto.descripcion, concepto.tipo, concepto.seqs,
+        pool,
+        concepto.label,
+        concepto.descripcion,
+        concepto.tipo,
+        concepto.seqs,
     )
 
 
@@ -289,16 +352,19 @@ class ResultadoCLS:
 
     dry_run: bool
     total_pendientes: int
-    salto: bool                  # True si <umbral pendientes
-    clusters: int                # clusters formados
-    conceptos_escritos: int      # conceptos que llegaron al grafo (0 en dry-run)
-    episodios_marcados: int      # episodios consolidated_to_kg=true (0 en dry-run)
-    via_llm: int                 # cuántos conceptos los hizo el LLM (vs fallback)
-    detalle: list[dict]          # por cluster: {label, tipo, n_ep, via_llm, escrito}
+    salto: bool  # True si <umbral pendientes
+    clusters: int  # clusters formados
+    conceptos_escritos: int  # conceptos que llegaron al grafo (0 en dry-run)
+    episodios_marcados: int  # episodios consolidated_to_kg=true (0 en dry-run)
+    via_llm: int  # cuántos conceptos los hizo el LLM (vs fallback)
+    detalle: list[dict]  # por cluster: {label, tipo, n_ep, via_llm, escrito}
 
 
 async def consolidar(
-    pool, session_id: str, *, dry_run: bool = True,
+    pool,
+    session_id: str,
+    *,
+    dry_run: bool = True,
     pausa_seg: float = PAUSA_ENTRE_CLUSTERS_SEG,
     max_conceptos: int = MAX_CONCEPTOS_POR_RUN,
     provider=None,
@@ -329,6 +395,7 @@ async def consolidar(
     if provider is None and not dry_run:
         from for3s_core.config import load_settings
         from for3s_core.llm import ClaudeProvider
+
         s = load_settings()
         provider = ClaudeProvider(token=s.anthropic_token, oauth=s.is_oauth, model=CLS_MODEL)
     # en dry-run igual extraemos conceptos (para mostrar), reusando provider si se pasó
@@ -357,24 +424,34 @@ async def consolidar(
                 marcados = await memory.marcar_consolidados(pool, session_id, concepto.seqs)
                 episodios_marcados += marcados
 
-        detalle.append({
-            "label": concepto.label, "tipo": concepto.tipo,
-            "n_ep": cluster.tam, "via_llm": concepto.via_llm,
-            "escrito": escrito if not dry_run else None,
-        })
+        detalle.append(
+            {
+                "label": concepto.label,
+                "tipo": concepto.tipo,
+                "n_ep": cluster.tam,
+                "via_llm": concepto.via_llm,
+                "escrito": escrito if not dry_run else None,
+            }
+        )
         logger.info(
             "[cls] cluster %d/%d: %r (%d ep, llm=%s, escrito=%s)",
-            i + 1, len(clusters), concepto.label, cluster.tam,
-            concepto.via_llm, escrito if not dry_run else "DRY",
+            i + 1,
+            len(clusters),
+            concepto.label,
+            cluster.tam,
+            concepto.via_llm,
+            escrito if not dry_run else "DRY",
         )
 
     # meta-evento en audit (trazabilidad) — también en dry-run, marcado como tal
     try:
         await audit.append(
-            pool, actor="cls_orchestrator",
+            pool,
+            actor="cls_orchestrator",
             action="cls_consolidation_dryrun" if dry_run else "cls_consolidation",
             detail={
-                "session_id": session_id, "dry_run": dry_run,
+                "session_id": session_id,
+                "dry_run": dry_run,
                 "total_pendientes": res_clu.total_pendientes,
                 "clusters": len(clusters),
                 "conceptos_escritos": conceptos_escritos,
@@ -386,6 +463,12 @@ async def consolidar(
         logger.warning("[cls] audit append falló (no crítico): %s", type(e).__name__)
 
     return ResultadoCLS(
-        dry_run, res_clu.total_pendientes, False, len(clusters),
-        conceptos_escritos, episodios_marcados, via_llm_n, detalle,
+        dry_run,
+        res_clu.total_pendientes,
+        False,
+        len(clusters),
+        conceptos_escritos,
+        episodios_marcados,
+        via_llm_n,
+        detalle,
     )

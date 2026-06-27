@@ -35,6 +35,7 @@ def _contar_por_link(resp: httpx.Response, items_si_no_link: int) -> int:
     if 'rel="last"' in link:
         # ...page=NNN>; rel="last"
         import re
+
         m = re.search(r'[?&]page=(\d+)>;\s*rel="last"', link)
         if m:
             return int(m.group(1))
@@ -48,11 +49,18 @@ async def obtener_ficha(owner: str, repo: str, pat: str) -> dict:
     base = f"{_API}/repos/{owner}/{repo}"
     h = _headers(pat)
     ficha: dict = {
-        "descripcion": None, "homepage": None, "topics": [],
-        "lenguajes": [], "lenguaje_principal": None,
-        "contributors": None, "deployments": None,
-        "stars": None, "forks": None, "open_issues": None,
-        "default_branch": None, "license": None,
+        "descripcion": None,
+        "homepage": None,
+        "topics": [],
+        "lenguajes": [],
+        "lenguaje_principal": None,
+        "contributors": None,
+        "deployments": None,
+        "stars": None,
+        "forks": None,
+        "open_issues": None,
+        "default_branch": None,
+        "license": None,
     }
     async with httpx.AsyncClient(timeout=20) as cli:
         # 1) metadata del repo (About, stars, license, topics...)
@@ -86,8 +94,9 @@ async def obtener_ficha(owner: str, repo: str, pat: str) -> dict:
             pass
         # 3) contributors (conteo)
         try:
-            r = await cli.get(f"{base}/contributors", headers=h,
-                              params={"per_page": 1, "anon": "true"})
+            r = await cli.get(
+                f"{base}/contributors", headers=h, params={"per_page": 1, "anon": "true"}
+            )
             if r.status_code == 200:
                 ficha["contributors"] = _contar_por_link(r, len(r.json()))
         except Exception:

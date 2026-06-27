@@ -61,7 +61,8 @@ async def guardar_status(pool, session_id: str, texto: str) -> None:
             "VALUES ($1, $2, now()) "
             "ON CONFLICT (session_id) DO UPDATE "
             "SET texto = $2, actualizado_at = now()",
-            session_id, texto,
+            session_id,
+            texto,
         )
 
 
@@ -79,7 +80,8 @@ async def debe_inyectar(pool, session_id: str) -> str | None:
             if ult is None:
                 return None
             horas = await con.fetchval(
-                "SELECT EXTRACT(EPOCH FROM (now() - $1))/3600", ult,
+                "SELECT EXTRACT(EPOCH FROM (now() - $1))/3600",
+                ult,
             )
         if horas is None or float(horas) < HORAS_RETOMAR:
             return None  # conversación activa → no estorbar
@@ -100,31 +102,32 @@ async def generar_status(pool, session_id: str, *, provider=None) -> str | None:
         if len(turns) < MIN_TURNOS:
             return None  # hilo muy nuevo, no vale la pena
         cuerpo = "\n".join(
-            f"{'Usuario' if t.role == 'user' else 'For3s'}: "
-            f"{(t.content or '').strip()[:300]}"
+            f"{'Usuario' if t.role == 'user' else 'For3s'}: {(t.content or '').strip()[:300]}"
             for t in turns
         )
         prompt = _INSTRUCCION + cuerpo
         if provider is None:
             from for3s_core.config import load_settings
             from for3s_core.llm import ClaudeProvider
+
             s = load_settings()
-            provider = ClaudeProvider(
-                token=s.anthropic_token, oauth=s.is_oauth, model=STATUS_MODEL)
+            provider = ClaudeProvider(token=s.anthropic_token, oauth=s.is_oauth, model=STATUS_MODEL)
         import asyncio
+
         resp = await asyncio.to_thread(
-            provider.complete, prompt, system="", max_tokens=200,
+            provider.complete,
+            prompt,
+            system="",
+            max_tokens=200,
         )
         texto = (resp.text or "").strip()
         if not texto:
             return None
         await guardar_status(pool, session_id, texto)
-        logger.info("[hilo_status] STATUS generado para %s (%d chars)",
-                    session_id, len(texto))
+        logger.info("[hilo_status] STATUS generado para %s (%d chars)", session_id, len(texto))
         return texto
     except Exception:  # noqa: BLE001 — un STATUS fallido NUNCA tumba el ciclo nocturno
-        logger.warning("[hilo_status] no pude generar STATUS de %s", session_id,
-                       exc_info=True)
+        logger.warning("[hilo_status] no pude generar STATUS de %s", session_id, exc_info=True)
         return None
 
 

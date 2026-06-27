@@ -26,9 +26,9 @@ logger = logging.getLogger("for3s.multiagente")
 class Mensaje:
     """Un mensaje en el bus. Simple y explícito."""
 
-    de: str               # quién lo manda (hub | nombre del specialist)
-    para: str             # destino (hub | nombre del specialist | "all")
-    tipo: str             # tarea | reporte | evento
+    de: str  # quién lo manda (hub | nombre del specialist)
+    para: str  # destino (hub | nombre del specialist | "all")
+    tipo: str  # tarea | reporte | evento
     contenido: object = None
 
 
@@ -46,8 +46,7 @@ class MessageBus:
         self.hub_inbox: asyncio.Queue = asyncio.Queue(maxsize=self.HUB_INBOX_MAXSIZE)
         # un buzón por specialist: el Hub les deja aquí su tarea/instrucciones
         self.specialist_inbox: dict[str, asyncio.Queue] = {
-            name: asyncio.Queue(maxsize=self.SPECIALIST_INBOX_MAXSIZE)
-            for name in specialists
+            name: asyncio.Queue(maxsize=self.SPECIALIST_INBOX_MAXSIZE) for name in specialists
         }
         # broadcast HUB → ALL (ej. "cancelen"): evento + payload
         self.broadcast_event: asyncio.Event = asyncio.Event()
@@ -119,10 +118,10 @@ class ResultadoEquipo:
     """Lo que el Hub devuelve tras coordinar al equipo (para el Synthesizer, S5)."""
 
     familia: str
-    reportes: list          # list[ResultadoSpecialist]
+    reportes: list  # list[ResultadoSpecialist]
     segundos_total: float
-    n_ok: int               # cuántos specialists completaron con éxito
-    costo: object = None     # PresupuestoCorrida (cost control S8) — tokens/llamadas
+    n_ok: int  # cuántos specialists completaron con éxito
+    costo: object = None  # PresupuestoCorrida (cost control S8) — tokens/llamadas
 
 
 def decidir_familia(tarea: str) -> str:
@@ -130,13 +129,18 @@ def decidir_familia(tarea: str) -> str:
     código → 'tecnica'; si no → 'general'. Reusa el detector ya existente."""
     try:
         from for3s_core.conversation import huele_a_github
+
         return "tecnica" if huele_a_github(tarea) else "general"
     except Exception:  # noqa: BLE001 — si falla el detector, default general (más amplio)
         return "general"
 
 
 async def correr_equipo(
-    tarea: str, *, provider=None, familia: str | None = None, on_progreso=None,
+    tarea: str,
+    *,
+    provider=None,
+    familia: str | None = None,
+    on_progreso=None,
 ) -> ResultadoEquipo:
     """El HUB coordina al equipo sobre `tarea` (S4):
       1. decide la FAMILIA (técnica/general) — o usa la forzada.
@@ -171,6 +175,7 @@ async def correr_equipo(
 
     # COST CONTROL S8 — capa 1 (pre-flight): ¿hay presupuesto para esta corrida?
     from for3s_core.cost_control import PresupuestoCorrida
+
     presupuesto = PresupuestoCorrida()
     puede, razon = presupuesto.puede_lanzar(len(defs))
     if not puede:
@@ -183,6 +188,7 @@ async def correr_equipo(
     if provider is None:
         from for3s_core.config import load_settings
         from for3s_core.llm import ClaudeProvider
+
         s = load_settings()
         provider = ClaudeProvider(token=s.anthropic_token, oauth=s.is_oauth, model=s.model)
 
@@ -212,23 +218,29 @@ async def correr_equipo(
     # cortamos: cancelamos lo pendiente y armamos reportes "no completó" para esos.
     # Así un specialist atascado NUNCA cuelga al bot — se entrega lo que sí llegó.
     from for3s_core.specialists import ResultadoSpecialist
+
     try:
         reportes = await asyncio.wait_for(
             asyncio.gather(*tasks, return_exceptions=True),
             timeout=TIMEOUT_EQUIPO_SEG,
         )
     except TimeoutError:
-        logger.warning("[hub] TIMEOUT GLOBAL del equipo (%ds) → corto y entrego lo que hay",
-                       TIMEOUT_EQUIPO_SEG)
+        logger.warning(
+            "[hub] TIMEOUT GLOBAL del equipo (%ds) → corto y entrego lo que hay", TIMEOUT_EQUIPO_SEG
+        )
         reportes = []
         for d, t in zip(defs, tasks, strict=True):
             if t.done() and not t.cancelled() and t.exception() is None:
                 reportes.append(t.result())
             else:
                 t.cancel()
-                reportes.append(ResultadoSpecialist(
-                    nombre=d.nombre, ok=False,
-                    texto=f"({d.nombre} no completó: timeout global del equipo)"))
+                reportes.append(
+                    ResultadoSpecialist(
+                        nombre=d.nombre,
+                        ok=False,
+                        texto=f"({d.nombre} no completó: timeout global del equipo)",
+                    )
+                )
 
     # normalizar: una excepción del gather → reporte fallido (defensa extra)
     norm = []
@@ -237,8 +249,11 @@ async def correr_equipo(
             norm.append(r)
         else:  # excepción escapada → no tumba al equipo
             logger.warning("[hub] %s lanzó %s → reporte fallido", d.nombre, type(r).__name__)
-            norm.append(ResultadoSpecialist(
-                nombre=d.nombre, ok=False, texto=f"({d.nombre} falló: {type(r).__name__})"))
+            norm.append(
+                ResultadoSpecialist(
+                    nombre=d.nombre, ok=False, texto=f"({d.nombre} falló: {type(r).__name__})"
+                )
+            )
     reportes = norm
 
     # COST CONTROL S8 — capa 3 (monitoring): sumar el gasto de cada specialist al
@@ -249,10 +264,20 @@ async def correr_equipo(
 
     dt = time.time() - t0
     n_ok = sum(1 for r in reportes if r.ok)
-    logger.info("[hub] equipo '%s' terminó: %d/%d ok en %.1fs · %s",
-                fam, n_ok, len(reportes), dt, presupuesto.reporte())
+    logger.info(
+        "[hub] equipo '%s' terminó: %d/%d ok en %.1fs · %s",
+        fam,
+        n_ok,
+        len(reportes),
+        dt,
+        presupuesto.reporte(),
+    )
     return ResultadoEquipo(
-        familia=fam, reportes=reportes, segundos_total=dt, n_ok=n_ok, costo=presupuesto,
+        familia=fam,
+        reportes=reportes,
+        segundos_total=dt,
+        n_ok=n_ok,
+        costo=presupuesto,
     )
 
 
@@ -317,19 +342,22 @@ async def sintetizar(equipo: ResultadoEquipo, *, provider=None) -> str:
 
     if not crudos:
         return (
-            "Ningún especialista pudo completar su análisis. Reintenta en un momento."
-            + nota_caidos
+            "Ningún especialista pudo completar su análisis. Reintenta en un momento." + nota_caidos
         )
 
     try:
         if provider is None:
             from for3s_core.config import load_settings
             from for3s_core.llm import ClaudeProvider
+
             s = load_settings()
             provider = ClaudeProvider(token=s.anthropic_token, oauth=s.is_oauth, model=s.model)
         prompt = _INSTRUCCION_SINTESIS + crudos
         resp = await asyncio.to_thread(
-            provider.complete, prompt, system="", max_tokens=2000,
+            provider.complete,
+            prompt,
+            system="",
+            max_tokens=2000,
         )
         logger.info("[synthesizer] informe combinado (%d specialists ok)", equipo.n_ok)
         return resp.text.strip() + nota_caidos
@@ -337,7 +365,8 @@ async def sintetizar(equipo: ResultadoEquipo, *, provider=None) -> str:
         logger.warning("[synthesizer] falló (%s) → devuelvo bloques crudos", type(e).__name__)
         return (
             "📋 Informe del equipo (sin combinar — la síntesis no estuvo disponible):\n\n"
-            + crudos + nota_caidos
+            + crudos
+            + nota_caidos
         )
 
 
@@ -355,7 +384,7 @@ async def sintetizar(equipo: ResultadoEquipo, *, provider=None) -> str:
 
 # Bounds declarativos (lo que el diseño LOCKED pide explícito). Hoy se aplican vía
 # CONCURRENCIA_MAX (RAM) + max_tokens por specialist (S1, acota su contexto/salida).
-RAM_ALERTA_MB = 6000   # si el proceso pasa esto, log de alerta (server ~19GB, BGE-M3 ~2.6GB)
+RAM_ALERTA_MB = 6000  # si el proceso pasa esto, log de alerta (server ~19GB, BGE-M3 ~2.6GB)
 
 
 def uso_memoria_mb() -> int:

@@ -5,7 +5,6 @@ de archivos (subbloques), conversor MD→HTML (md_html), zonas horarias (tiempo)
 parseo HTML (web_fetch), y los detectores org/repo/modo (conversation).
 """
 
-
 from for3s_core import multimodal, subbloques, tiempo, tool_loop, web_fetch
 from for3s_core.conversation import extraer_org, extraer_owner_repo, huele_a_github
 from for3s_core.md_html import md_a_html_telegram
@@ -68,11 +67,11 @@ class TestCapaEjecucion:
 class TestReparto:
     archivos = (
         ["README.md"]
-        + [f"docs/d{i}.md" for i in range(30)]          # 30 docs
-        + ["package.json", "tsconfig.json"]              # 2 config
-        + [f"src/c{i}.ts" for i in range(50)]            # 50 src
-        + [f"tests/t{i}.test.ts" for i in range(20)]     # 20 test
-        + [f"x{i}.bin" for i in range(10)]               # 10 otro
+        + [f"docs/d{i}.md" for i in range(30)]  # 30 docs
+        + ["package.json", "tsconfig.json"]  # 2 config
+        + [f"src/c{i}.ts" for i in range(50)]  # 50 src
+        + [f"tests/t{i}.test.ts" for i in range(20)]  # 20 test
+        + [f"x{i}.bin" for i in range(10)]  # 10 otro
     )
 
     def test_simple_lee_pocos(self):
@@ -130,6 +129,7 @@ class TestMdHtml:
 
     def test_tags_balanceados(self):
         import re
+
         out = md_a_html_telegram("**a** y `b` y *c* y # H\n```\nx\n```")
         for tag in ("b", "code", "pre", "i"):
             assert len(re.findall(f"<{tag}>", out)) == len(re.findall(f"</{tag}>", out)), tag
@@ -190,7 +190,9 @@ class TestWebFetch:
         assert web_fetch._normaliza("https://X.com/") == web_fetch._normaliza("http://x.com")
 
     def test_normaliza_detecta_destino_distinto(self):
-        assert web_fetch._normaliza("https://a.co/d/x") != web_fetch._normaliza("https://amazon.com/dp/y")
+        assert web_fetch._normaliza("https://a.co/d/x") != web_fetch._normaliza(
+            "https://amazon.com/dp/y"
+        )
 
     def test_huele_a_antibot_amazon(self):
         assert web_fetch._huele_a_antibot("Click the button below to continue shopping")
@@ -228,7 +230,8 @@ class TestDetectores:
     def test_url_web_no_es_github(self):
         # fix falso positivo (2026-06-19): dominio.com/path NO es repo
         assert not huele_a_github(
-            "https://www.tvazteca.com/aztecadeportes/mundial-2026/envivo el partido")
+            "https://www.tvazteca.com/aztecadeportes/mundial-2026/envivo el partido"
+        )
         assert not huele_a_github("resume https://react.dev/learn/thinking-in-react")
         assert not huele_a_github("https://luma.com/yov2v22b que es esto")
         assert not huele_a_github("checa https://ethglobal.com/events/2026")
@@ -253,8 +256,9 @@ class TestMultimodal:
         assert bloques[0]["source"]["media_type"] == "image/jpeg"
 
     def test_pdf_es_document(self):
-        bloques = multimodal.procesar_adjunto(b"%PDF-1.4 fake", nombre="x.pdf",
-                                              mime="application/pdf")
+        bloques = multimodal.procesar_adjunto(
+            b"%PDF-1.4 fake", nombre="x.pdf", mime="application/pdf"
+        )
         assert bloques[0]["type"] == "document"
         assert bloques[0]["source"]["media_type"] == "application/pdf"
 
@@ -262,6 +266,7 @@ class TestMultimodal:
         import io
 
         from docx import Document
+
         doc = Document()
         doc.add_paragraph("Hola desde Word")
         buf = io.BytesIO()
@@ -274,6 +279,7 @@ class TestMultimodal:
         import io
 
         from openpyxl import Workbook
+
         wb = Workbook()
         ws = wb.active
         ws.append(["nombre", "edad"])
@@ -286,16 +292,19 @@ class TestMultimodal:
 
     def test_tipo_no_soportado(self):
         import pytest
+
         with pytest.raises(multimodal.ArchivoNoSoportado):
             multimodal.procesar_adjunto(b"zip", nombre="a.zip", mime="application/zip")
 
     def test_archivo_vacio(self):
         import pytest
+
         with pytest.raises(multimodal.ArchivoNoSoportado):
             multimodal.procesar_adjunto(b"", nombre="x.png", mime="image/png")
 
     def test_archivo_demasiado_grande(self):
         import pytest
+
         enorme = b"x" * (multimodal.MAX_BYTES + 1)
         with pytest.raises(multimodal.ArchivoNoSoportado):
             multimodal.procesar_adjunto(enorme, nombre="x.png", mime="image/png")
@@ -307,14 +316,16 @@ class TestMultimodal:
     def test_pdf_gigante_avisa_honesto(self):
         # PDF > MAX_BYTES_NATIVO (8MB) → aviso honesto, no intentar y morir
         import pytest
+
         grande = b"%PDF-1.4" + b"x" * (multimodal.MAX_BYTES_NATIVO + 1)
         with pytest.raises(multimodal.ArchivoNoSoportado):
             multimodal.procesar_adjunto(grande, nombre="big.pdf", mime="application/pdf")
 
     def test_pdf_normal_si_pasa(self):
         # un PDF chico (bajo el umbral nativo) sí se procesa
-        bloques = multimodal.procesar_adjunto(b"%PDF-1.4 chico", nombre="ok.pdf",
-                                              mime="application/pdf")
+        bloques = multimodal.procesar_adjunto(
+            b"%PDF-1.4 chico", nombre="ok.pdf", mime="application/pdf"
+        )
         assert bloques[0]["type"] == "document"
 
 
@@ -341,33 +352,45 @@ class TestConteo:
 class TestWriteTools:
     def test_solo_4_write_permitidas(self):
         from for3s_core import tool_loop
+
         assert tool_loop.WRITE_TOOLS_PERMITIDAS == {
-            "add_issue_comment", "create_issue",
-            "create_pull_request", "create_pull_request_review",
+            "add_issue_comment",
+            "create_issue",
+            "create_pull_request",
+            "create_pull_request_review",
         }
 
     def test_destructive_NO_permitidas(self):
         # la garantía central: NUNCA estas en la whitelist (ni schema inyectado)
         from for3s_core import tool_loop
-        prohibidas = {"merge_pull_request", "delete_repository",
-                      "create_repository", "push_files", "create_or_update_file",
-                      "update_pull_request_branch"}
+
+        prohibidas = {
+            "merge_pull_request",
+            "delete_repository",
+            "create_repository",
+            "push_files",
+            "create_or_update_file",
+            "update_pull_request_branch",
+        }
         assert not (prohibidas & tool_loop.WRITE_TOOLS_PERMITIDAS)
         nombres_schema = {s["name"] for s in tool_loop.WRITE_TOOL_SCHEMAS}
         assert not (prohibidas & nombres_schema)
 
     def test_schemas_cubren_las_permitidas(self):
         from for3s_core import tool_loop
+
         nombres_schema = {s["name"] for s in tool_loop.WRITE_TOOL_SCHEMAS}
         assert nombres_schema == tool_loop.WRITE_TOOLS_PERMITIDAS
 
     def test_write_no_estan_en_read_whitelist(self):
         # las write NUNCA deben colarse en MVP_TOOLS (read) → no se auto-ejecutan
         from for3s_core import tool_loop
+
         assert not (tool_loop.WRITE_TOOLS_PERMITIDAS & tool_loop.MVP_TOOLS)
 
     def test_directive_menciona_confirmacion(self):
         from for3s_core.conversation import TOOL_DIRECTIVE
+
         assert "confirmaci" in TOOL_DIRECTIVE.lower()
         assert "create_pull_request" in TOOL_DIRECTIVE
 
@@ -375,11 +398,22 @@ class TestWriteTools:
         # routing fix (2026-06-18): 'comenta/crea' con URL de repo → write,
         # 'analiza' con URL de repo → análisis. Replica la lógica del canal.
         from for3s_core.text_normalize import normalizar
-        PAL = ("comenta", "comentar", "crea un issue", "crear issue",
-               "crea issue", "abre un issue", "crea un pr", "review")
+
+        PAL = (
+            "comenta",
+            "comentar",
+            "crea un issue",
+            "crear issue",
+            "crea issue",
+            "abre un issue",
+            "crea un pr",
+            "review",
+        )
+
         def quiere_escribir(m):
             t = normalizar(m)
             return any(p in t for p in PAL)
+
         assert quiere_escribir("comenta hola en el issue #1 de github.com/o/r")
         assert quiere_escribir("crea un issue en github.com/o/r")
         assert not quiere_escribir("analiza https://github.com/cli/cli")
@@ -390,6 +424,7 @@ class TestWriteTools:
 class TestCache:
     def test_ttl_por_tool(self):
         from for3s_core.cache import GitHubCache
+
         assert GitHubCache.cacheable("get_file_contents") == 300
         assert GitHubCache.cacheable("list_issues") == 30
         assert GitHubCache.cacheable("search_code") == 900
@@ -397,21 +432,29 @@ class TestCache:
     def test_write_tools_NO_cacheables(self):
         # garantía: las write NUNCA se cachean (devuelven None = no cache)
         from for3s_core.cache import GitHubCache
-        for w in ("add_issue_comment", "create_issue",
-                  "create_pull_request", "create_pull_request_review"):
+
+        for w in (
+            "add_issue_comment",
+            "create_issue",
+            "create_pull_request",
+            "create_pull_request_review",
+        ):
             assert GitHubCache.cacheable(w) is None, w
 
     def test_never_cache(self):
         from for3s_core.cache import GitHubCache
+
         assert GitHubCache.cacheable("get_pull_request_status") is None
         assert GitHubCache.cacheable("get_pull_request_files") is None
 
     def test_tool_desconocida_no_cachea(self):
         from for3s_core.cache import GitHubCache
+
         assert GitHubCache.cacheable("tool_inventada") is None
 
     def test_key_estable_sin_importar_orden_args(self):
         from for3s_core.cache import GitHubCache
+
         k1 = GitHubCache._key("brian", "issue_read", {"owner": "x", "repo": "y", "n": 1})
         k2 = GitHubCache._key("brian", "issue_read", {"n": 1, "repo": "y", "owner": "x"})
         assert k1 == k2
@@ -419,12 +462,14 @@ class TestCache:
     def test_key_distinta_por_workspace(self):
         # multi-tenant: dos workspaces NUNCA comparten cache
         from for3s_core.cache import GitHubCache
+
         ka = GitHubCache._key("brian", "issue_read", {"n": 1})
         kb = GitHubCache._key("otro", "issue_read", {"n": 1})
         assert ka != kb
 
     def test_key_distinta_por_args(self):
         from for3s_core.cache import GitHubCache
+
         ka = GitHubCache._key("brian", "issue_read", {"n": 1})
         kb = GitHubCache._key("brian", "issue_read", {"n": 2})
         assert ka != kb

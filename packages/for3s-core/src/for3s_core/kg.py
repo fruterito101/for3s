@@ -80,8 +80,12 @@ async def registrar_repo(pool: asyncpg.Pool, owner: str, repo: str) -> bool:
 
 
 async def registrar_recurso(
-    pool: asyncpg.Pool, owner: str, repo: str, kind: str,
-    numero: int | None = None, titulo: str = "",
+    pool: asyncpg.Pool,
+    owner: str,
+    repo: str,
+    kind: str,
+    numero: int | None = None,
+    titulo: str = "",
 ) -> bool:
     """Registra un issue/PR de un repo en el grafo (idempotente).
     kind: 'issue' | 'pr'. Crea (Repo)-[:TIENE]->(Issue/PullRequest)."""
@@ -133,8 +137,7 @@ async def stats(pool: asyncpg.Pool) -> dict:
     y luego construir el mapa de 1 columna."""
     filas = await _read(
         pool,
-        "MATCH (n) WITH labels(n)[0] AS tipo, count(*) AS c "
-        "RETURN {tipo: tipo, n: c} AS r",
+        "MATCH (n) WITH labels(n)[0] AS tipo, count(*) AS c RETURN {tipo: tipo, n: c} AS r",
     )
     return {f.get("tipo"): f.get("n") for f in filas if isinstance(f, dict)}
 
@@ -143,8 +146,13 @@ async def stats(pool: asyncpg.Pool) -> dict:
 # H6 CLS — conceptos consolidados (escritos por consolidator.py, Sub-paso 6)
 # ===========================================================================
 
+
 async def registrar_concepto(
-    pool: asyncpg.Pool, label: str, descripcion: str, tipo: str, seqs: list[int],
+    pool: asyncpg.Pool,
+    label: str,
+    descripcion: str,
+    tipo: str,
+    seqs: list[int],
 ) -> bool:
     """Escribe un CONCEPTO consolidado en el grafo (idempotente vía MERGE).
 
@@ -159,8 +167,7 @@ async def registrar_concepto(
     lab, desc, tp = _esc(label), _esc(descripcion), _esc(tipo)
     # 1) MERGE del nodo concepto (identidad = label) + actualizar props
     cypher_nodo = (
-        f"MERGE (c:Concepto {{label:'{lab}'}}) "
-        f"SET c.descripcion = '{desc}', c.tipo = '{tp}'"
+        f"MERGE (c:Concepto {{label:'{lab}'}}) SET c.descripcion = '{desc}', c.tipo = '{tp}'"
     )
     if not await _write(pool, cypher_nodo):
         return False

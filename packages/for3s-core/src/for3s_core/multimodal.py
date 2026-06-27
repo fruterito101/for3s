@@ -28,15 +28,15 @@ import io
 # Límites de seguridad. La API de Claude acepta imágenes/PDF hasta cierto tamaño;
 # Telegram de su lado limita los archivos. Cortamos antes para no reventar memoria
 # ni mandar payloads que la API rechace.
-MAX_BYTES = 20 * 1024 * 1024          # 20 MB por archivo (límite duro)
-MAX_TEXTO_EXTRAIDO = 30_000           # chars de texto de Word/Excel que pasamos
-MAX_FILAS_EXCEL = 500                 # no volcar hojas gigantes enteras
+MAX_BYTES = 20 * 1024 * 1024  # 20 MB por archivo (límite duro)
+MAX_TEXTO_EXTRAIDO = 30_000  # chars de texto de Word/Excel que pasamos
+MAX_FILAS_EXCEL = 500  # no volcar hojas gigantes enteras
 
 # Umbral "MUY grande" para PDF/imagen que van a Claude como base64 (el dueño
 # 2026-06-18): un archivo pesado infla el payload → Claude tarda y httpx puede
 # dar ReadTimeout aun con timeout de 180s. Si supera esto, avisamos HONESTO en
 # vez de intentarlo y morir. ~8 MB de binario ≈ payload ya muy grande.
-MAX_BYTES_NATIVO = 8 * 1024 * 1024    # PDF/imagen que se manda en base64
+MAX_BYTES_NATIVO = 8 * 1024 * 1024  # PDF/imagen que se manda en base64
 
 # MIME types de imagen que la API de Claude acepta como bloque image.
 _IMAGENES_OK = {
@@ -58,8 +58,11 @@ def _es_imagen(mime: str, nombre: str) -> str | None:
         return _IMAGENES_OK[mime]
     bajo = nombre.lower()
     for ext, mt in (
-        (".jpg", "image/jpeg"), (".jpeg", "image/jpeg"), (".png", "image/png"),
-        (".gif", "image/gif"), (".webp", "image/webp"),
+        (".jpg", "image/jpeg"),
+        (".jpeg", "image/jpeg"),
+        (".png", "image/png"),
+        (".gif", "image/gif"),
+        (".webp", "image/webp"),
     ):
         if bajo.endswith(ext):
             return mt
@@ -78,13 +81,10 @@ def _es_word(mime: str, nombre: str) -> bool:
 
 
 def _es_excel(mime: str, nombre: str) -> bool:
-    return (
-        mime in (
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            "application/vnd.ms-excel",
-        )
-        or nombre.lower().endswith((".xlsx", ".xlsm"))
-    )
+    return mime in (
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.ms-excel",
+    ) or nombre.lower().endswith((".xlsx", ".xlsm"))
 
 
 def _texto_de_word(datos: bytes) -> str:
@@ -166,18 +166,22 @@ def procesar_adjunto(datos: bytes, *, nombre: str = "", mime: str = "") -> list[
     if media:
         _exigir_no_gigante(datos, "imagen")
         b64 = base64.standard_b64encode(datos).decode("ascii")
-        return [{
-            "type": "image",
-            "source": {"type": "base64", "media_type": media, "data": b64},
-        }]
+        return [
+            {
+                "type": "image",
+                "source": {"type": "base64", "media_type": media, "data": b64},
+            }
+        ]
 
     if _es_pdf(mime, nombre):
         _exigir_no_gigante(datos, "PDF")
         b64 = base64.standard_b64encode(datos).decode("ascii")
-        return [{
-            "type": "document",
-            "source": {"type": "base64", "media_type": "application/pdf", "data": b64},
-        }]
+        return [
+            {
+                "type": "document",
+                "source": {"type": "base64", "media_type": "application/pdf", "data": b64},
+            }
+        ]
 
     if _es_word(mime, nombre):
         texto = _texto_de_word(datos)[:MAX_TEXTO_EXTRAIDO]

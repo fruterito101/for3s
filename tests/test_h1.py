@@ -136,7 +136,8 @@ def test_429_falso_system_no_reintenta(monkeypatch) -> None:
     def falso_429(payload, betas_extra=()):
         llamadas["n"] += 1
         return _FakeResp(
-            429, headers={},
+            429,
+            headers={},
             text='{"type":"error","error":{"type":"rate_limit_error","message":"Error"}}',
         )
 

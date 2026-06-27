@@ -36,18 +36,18 @@ ROLES = (ROL_ENCARGADO, ROL_MIEMBRO)
 #   "si"      → la persona puede hacerla directo.
 #   "propone" → puede pedirla, pero el ENCARGADO debe aprobarla (gate S10d).
 #   "no"      → no puede.
-ACCION_CONVERSAR = "conversar"          # chatear, preguntar, usar memoria
+ACCION_CONVERSAR = "conversar"  # chatear, preguntar, usar memoria
 ACCION_LANZAR_EQUIPO = "lanzar_equipo"  # disparar el multi-agente (análisis)
-ACCION_SENSIBLE = "accion_sensible"     # escribir en GitHub, borrar, etc.
-ACCION_PUERTA = "puerta"                # abrir/cerrar /invitar
-ACCION_GESTION = "gestion_miembros"     # gestionar miembros (kick a futuro)
+ACCION_SENSIBLE = "accion_sensible"  # escribir en GitHub, borrar, etc.
+ACCION_PUERTA = "puerta"  # abrir/cerrar /invitar
+ACCION_GESTION = "gestion_miembros"  # gestionar miembros (kick a futuro)
 
 # matriz rol → acción → nivel
 _PERMISOS: dict[str, dict[str, str]] = {
     ROL_ENCARGADO: {
         ACCION_CONVERSAR: "si",
         ACCION_LANZAR_EQUIPO: "si",
-        ACCION_SENSIBLE: "si",       # el encargado ejecuta directo
+        ACCION_SENSIBLE: "si",  # el encargado ejecuta directo
         ACCION_PUERTA: "si",
         ACCION_GESTION: "si",
     },
@@ -97,20 +97,26 @@ class Solicitud:
     accion: str
     descripcion: str
     payload: dict
-    estado: str               # 'pendiente' | 'aprobada' | 'rechazada'
+    estado: str  # 'pendiente' | 'aprobada' | 'rechazada'
     resuelta_por: int | None = None
 
 
 def _row_a_solicitud(r) -> Solicitud:
     """Convierte una fila de la tabla solicitudes en Solicitud (parsea el payload)."""
     import json
+
     payload = r["payload"]
     if isinstance(payload, str):
         payload = json.loads(payload)
     return Solicitud(
-        id=r["id"], equipo_id=r["equipo_id"], solicitante_id=r["solicitante_id"],
-        accion=r["accion"], descripcion=r["descripcion"], payload=payload or {},
-        estado=r["estado"], resuelta_por=r["resuelta_por"],
+        id=r["id"],
+        equipo_id=r["equipo_id"],
+        solicitante_id=r["solicitante_id"],
+        accion=r["accion"],
+        descripcion=r["descripcion"],
+        payload=payload or {},
+        estado=r["estado"],
+        resuelta_por=r["resuelta_por"],
     )
 
 
@@ -124,8 +130,11 @@ class EquipoStore:
     # ---- ciclo de vida del equipo -------------------------------------------------
 
     async def asegurar_equipo(
-        self, encargado_id: int, nombre: str = "Mi equipo",
-        *, nombre_encargado: str | None = None,
+        self,
+        encargado_id: int,
+        nombre: str = "Mi equipo",
+        *,
+        nombre_encargado: str | None = None,
     ) -> int:
         """Garantiza que el dueño tenga su equipo (idempotente). Lo crea con la puerta
         CERRADA y registra al dueño como encargado. Devuelve el equipo_id.
@@ -138,7 +147,8 @@ class EquipoStore:
         vez — NO al arranque, para no romper el modo single-owner de quien no use equipo."""
         async with self._pool.acquire() as con:
             eid = await con.fetchval(
-                "SELECT id FROM equipos WHERE encargado_id = $1", encargado_id,
+                "SELECT id FROM equipos WHERE encargado_id = $1",
+                encargado_id,
             )
             if eid is not None:
                 # M1: auto-curar el nombre del encargado si está vacío y ahora lo tenemos
@@ -146,18 +156,24 @@ class EquipoStore:
                     await con.execute(
                         "UPDATE equipo_miembros SET nombre = $3 "
                         "WHERE equipo_id = $1 AND user_id = $2 AND (nombre IS NULL OR nombre = '')",
-                        eid, encargado_id, nombre_encargado,
+                        eid,
+                        encargado_id,
+                        nombre_encargado,
                     )
                 return eid
             eid = await con.fetchval(
                 "INSERT INTO equipos (nombre, encargado_id, puerta_abierta) "
                 "VALUES ($1, $2, false) RETURNING id",
-                nombre, encargado_id,
+                nombre,
+                encargado_id,
             )
             await con.execute(
                 "INSERT INTO equipo_miembros (equipo_id, user_id, rol, nombre) "
                 "VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING",
-                eid, encargado_id, ROL_ENCARGADO, nombre_encargado,
+                eid,
+                encargado_id,
+                ROL_ENCARGADO,
+                nombre_encargado,
             )
             logger.info("[equipo] creado equipo=%s encargado=%s", eid, encargado_id)
             return eid
@@ -175,24 +191,34 @@ class EquipoStore:
 
     async def puerta_abierta(self, equipo_id: int) -> bool:
         async with self._pool.acquire() as con:
-            return bool(await con.fetchval(
-                "SELECT puerta_abierta FROM equipos WHERE id = $1", equipo_id,
-            ))
+            return bool(
+                await con.fetchval(
+                    "SELECT puerta_abierta FROM equipos WHERE id = $1",
+                    equipo_id,
+                )
+            )
 
     async def set_puerta(self, equipo_id: int, abierta: bool) -> None:
         async with self._pool.acquire() as con:
             await con.execute(
                 "UPDATE equipos SET puerta_abierta = $2 WHERE id = $1",
-                equipo_id, abierta,
+                equipo_id,
+                abierta,
             )
-        logger.info("[equipo] puerta equipo=%s -> %s", equipo_id,
-                    "ABIERTA" if abierta else "CERRADA")
+        logger.info(
+            "[equipo] puerta equipo=%s -> %s", equipo_id, "ABIERTA" if abierta else "CERRADA"
+        )
 
     # ---- miembros ----------------------------------------------------------------
 
     async def agregar_miembro(
-        self, equipo_id: int, user_id: int, *, nombre: str | None = None,
-        rol: str = ROL_MIEMBRO, reinvitar: bool = False,
+        self,
+        equipo_id: int,
+        user_id: int,
+        *,
+        nombre: str | None = None,
+        rol: str = ROL_MIEMBRO,
+        reinvitar: bool = False,
     ) -> bool:
         """Registra (o re-activa) a una persona como miembro. Devuelve True si ENTRÓ
         nueva (o re-activada), False si ya estaba activa o está EXPULSADA y no es una
@@ -205,7 +231,8 @@ class EquipoStore:
             estado = await con.fetchrow(
                 "SELECT rol, activo, expulsado FROM equipo_miembros "
                 "WHERE equipo_id = $1 AND user_id = $2",
-                equipo_id, user_id,
+                equipo_id,
+                user_id,
             )
             if estado is not None and estado["activo"]:
                 return False  # ya estaba dentro
@@ -218,14 +245,23 @@ class EquipoStore:
                 "ON CONFLICT (equipo_id, user_id) DO UPDATE "
                 "SET activo = true, expulsado = false, "
                 "    nombre = COALESCE($4, equipo_miembros.nombre)",
-                equipo_id, user_id, rol, nombre,
+                equipo_id,
+                user_id,
+                rol,
+                nombre,
             )
-            logger.info("[equipo] miembro entró equipo=%s user=%s rol=%s reinvitar=%s",
-                        equipo_id, user_id, rol, reinvitar)
+            logger.info(
+                "[equipo] miembro entró equipo=%s user=%s rol=%s reinvitar=%s",
+                equipo_id,
+                user_id,
+                rol,
+                reinvitar,
+            )
             return True
 
-    async def sacar_miembro(self, equipo_id: int, encargado_id: int,
-                            objetivo_id: int) -> tuple[bool, str]:
+    async def sacar_miembro(
+        self, equipo_id: int, encargado_id: int, objetivo_id: int
+    ) -> tuple[bool, str]:
         """C-v: el ENCARGADO saca a un miembro (soft-remove: activo=false +
         expulsado=true → pierde acceso, su historial NO se borra, y NO re-entra por
         la puerta abierta). Verificación en BD (no confiar en el caller): quien saca
@@ -236,22 +272,30 @@ class EquipoStore:
         async with self._pool.acquire() as con:
             async with con.transaction():
                 rol_enc = await con.fetchval(
-                    "SELECT rol FROM equipo_miembros WHERE equipo_id=$1 AND user_id=$2 "
-                    "AND activo", equipo_id, encargado_id)
+                    "SELECT rol FROM equipo_miembros WHERE equipo_id=$1 AND user_id=$2 AND activo",
+                    equipo_id,
+                    encargado_id,
+                )
                 if rol_enc != ROL_ENCARGADO:
                     return False, "no_eres_encargado"
                 obj = await con.fetchrow(
-                    "SELECT rol, activo FROM equipo_miembros "
-                    "WHERE equipo_id=$1 AND user_id=$2", equipo_id, objetivo_id)
+                    "SELECT rol, activo FROM equipo_miembros WHERE equipo_id=$1 AND user_id=$2",
+                    equipo_id,
+                    objetivo_id,
+                )
                 if obj is None or not obj["activo"]:
                     return False, "no_es_miembro"
                 if obj["rol"] == ROL_ENCARGADO:
                     return False, "no_puedes_sacar_encargado"
                 await con.execute(
                     "UPDATE equipo_miembros SET activo=false, expulsado=true "
-                    "WHERE equipo_id=$1 AND user_id=$2", equipo_id, objetivo_id)
-        logger.info("[equipo] encargado=%s sacó a user=%s (equipo=%s)",
-                    encargado_id, objetivo_id, equipo_id)
+                    "WHERE equipo_id=$1 AND user_id=$2",
+                    equipo_id,
+                    objetivo_id,
+                )
+        logger.info(
+            "[equipo] encargado=%s sacó a user=%s (equipo=%s)", encargado_id, objetivo_id, equipo_id
+        )
         return True, "ok"
 
     async def miembros(self, equipo_id: int) -> list[Miembro]:
@@ -273,15 +317,16 @@ class EquipoStore:
     async def rol_de(self, equipo_id: int, user_id: int) -> str | None:
         async with self._pool.acquire() as con:
             return await con.fetchval(
-                "SELECT rol FROM equipo_miembros "
-                "WHERE equipo_id = $1 AND user_id = $2 AND activo",
-                equipo_id, user_id,
+                "SELECT rol FROM equipo_miembros WHERE equipo_id = $1 AND user_id = $2 AND activo",
+                equipo_id,
+                user_id,
             )
 
     # ---- autorización (el corazón, ADITIVO a OwnerStore) -------------------------
 
-    async def autorizar(self, owner_id: int | None, user_id: int | None,
-                        *, nombre: str | None = None) -> tuple[bool, str]:
+    async def autorizar(
+        self, owner_id: int | None, user_id: int | None, *, nombre: str | None = None
+    ) -> tuple[bool, str]:
         """¿Puede esta persona usar el bot? Lógica ADITIVA y FAIL-CLOSED:
 
           1. Sin user_id → denegado.
@@ -313,9 +358,14 @@ class EquipoStore:
                 )
                 expulsado = False
                 if eid is not None:
-                    expulsado = bool(await con.fetchval(
-                        "SELECT expulsado FROM equipo_miembros "
-                        "WHERE equipo_id=$1 AND user_id=$2", eid, user_id))
+                    expulsado = bool(
+                        await con.fetchval(
+                            "SELECT expulsado FROM equipo_miembros "
+                            "WHERE equipo_id=$1 AND user_id=$2",
+                            eid,
+                            user_id,
+                        )
+                    )
             if eid is not None and not expulsado:
                 # agregar_miembro devuelve False si está expulsado (no re-entra)
                 entro = await self.agregar_miembro(eid, user_id, nombre=nombre)
@@ -329,22 +379,36 @@ class EquipoStore:
     # ---- S10d: gate de aprobación del encargado ---------------------------------
 
     async def crear_solicitud(
-        self, equipo_id: int, solicitante_id: int, accion: str,
-        descripcion: str, *, payload: dict | None = None,
+        self,
+        equipo_id: int,
+        solicitante_id: int,
+        accion: str,
+        descripcion: str,
+        *,
+        payload: dict | None = None,
     ) -> int:
         """Un miembro PROPONE una acción sensible. Crea una solicitud 'pendiente'
         y devuelve su id (para avisar al encargado con botones aprobar/rechazar)."""
         import json
+
         async with self._pool.acquire() as con:
             sid = await con.fetchval(
                 "INSERT INTO solicitudes "
                 "(equipo_id, solicitante_id, accion, descripcion, payload) "
                 "VALUES ($1, $2, $3, $4, $5) RETURNING id",
-                equipo_id, solicitante_id, accion, descripcion,
+                equipo_id,
+                solicitante_id,
+                accion,
+                descripcion,
                 json.dumps(payload or {}),
             )
-        logger.info("[equipo] solicitud=%s creada equipo=%s por=%s accion=%s",
-                    sid, equipo_id, solicitante_id, accion)
+        logger.info(
+            "[equipo] solicitud=%s creada equipo=%s por=%s accion=%s",
+            sid,
+            equipo_id,
+            solicitante_id,
+            accion,
+        )
         return sid
 
     async def get_solicitud(self, solicitud_id: int) -> Solicitud | None:
@@ -368,7 +432,10 @@ class EquipoStore:
         return [_row_a_solicitud(r) for r in rows]
 
     async def _resolver(
-        self, solicitud_id: int, encargado_id: int, nuevo_estado: str,
+        self,
+        solicitud_id: int,
+        encargado_id: int,
+        nuevo_estado: str,
     ) -> Solicitud | None:
         """Aprueba o rechaza, SOLO si: existe, sigue pendiente y quien resuelve es
         ENCARGADO de ESE equipo (autorización en BD, no confiar en el caller).
@@ -380,21 +447,28 @@ class EquipoStore:
                     "LEFT JOIN equipo_miembros m ON m.equipo_id = s.equipo_id "
                     "AND m.user_id = $2 AND m.activo "
                     "WHERE s.id = $1 FOR UPDATE OF s",
-                    solicitud_id, encargado_id,
+                    solicitud_id,
+                    encargado_id,
                 )
                 if r is None or r["estado"] != "pendiente":
                     return None
                 if r["rol_resolutor"] != ROL_ENCARGADO:
-                    logger.warning("[equipo] solicitud=%s: %s NO es encargado, rechazo",
-                                   solicitud_id, encargado_id)
+                    logger.warning(
+                        "[equipo] solicitud=%s: %s NO es encargado, rechazo",
+                        solicitud_id,
+                        encargado_id,
+                    )
                     return None
                 await con.execute(
                     "UPDATE solicitudes SET estado = $2, resuelta_por = $3, "
                     "resuelta_at = now() WHERE id = $1",
-                    solicitud_id, nuevo_estado, encargado_id,
+                    solicitud_id,
+                    nuevo_estado,
+                    encargado_id,
                 )
-        logger.info("[equipo] solicitud=%s -> %s por encargado=%s",
-                    solicitud_id, nuevo_estado, encargado_id)
+        logger.info(
+            "[equipo] solicitud=%s -> %s por encargado=%s", solicitud_id, nuevo_estado, encargado_id
+        )
         return await self.get_solicitud(solicitud_id)
 
     async def aprobar(self, solicitud_id: int, encargado_id: int) -> Solicitud | None:

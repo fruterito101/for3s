@@ -19,13 +19,14 @@ from dataclasses import dataclass
 
 logger = logging.getLogger("for3s.skills")
 
-PROV_USUARIO = "usuario"   # la pidió un humano → intocable por el curator
-PROV_AUTO = "auto"         # auto-generada (H12) → el governor/curator la gestiona
+PROV_USUARIO = "usuario"  # la pidió un humano → intocable por el curator
+PROV_AUTO = "auto"  # auto-generada (H12) → el governor/curator la gestiona
 
 
 def normalizar_nombre(nombre: str) -> str:
     """slug seguro: minúsculas, sin acentos, espacios→guiones, [a-z0-9-]."""
     import unicodedata
+
     s = (nombre or "").strip().lower()
     s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode("ascii")
     s = re.sub(r"\s+", "-", s)
@@ -53,9 +54,17 @@ class SkillStore:
     def __init__(self, pool) -> None:
         self._pool = pool
 
-    async def crear(self, nombre: str, contenido: str, *, categoria: str = "general",
-                    descripcion: str = "", tags: list[str] | None = None,
-                    provenance: str = PROV_USUARIO, creada_por: int | None = None) -> int:
+    async def crear(
+        self,
+        nombre: str,
+        contenido: str,
+        *,
+        categoria: str = "general",
+        descripcion: str = "",
+        tags: list[str] | None = None,
+        provenance: str = PROV_USUARIO,
+        creada_por: int | None = None,
+    ) -> int:
         """Crea (o reemplaza) una skill. Devuelve su id. Idempotente por (cat,nombre)."""
         slug = normalizar_nombre(nombre)
         async with self._pool.acquire() as con:
@@ -66,23 +75,41 @@ class SkillStore:
                 "SET contenido=$4, descripcion=$3, tags=$5, actualizada_at=now(), "
                 "    lifecycle='active' "
                 "RETURNING id",
-                slug, categoria, descripcion[:200], contenido,
-                json.dumps(tags or []), provenance, creada_por)
+                slug,
+                categoria,
+                descripcion[:200],
+                contenido,
+                json.dumps(tags or []),
+                provenance,
+                creada_por,
+            )
         logger.info("[skills] creada/actualizada %s/%s (prov=%s)", categoria, slug, provenance)
         return sid
 
     async def listar(self, *, solo_activas: bool = True) -> list[SkillInfo]:
         """Lista skills (metadata, sin contenido). Por defecto solo las activas."""
         try:
-            q = ("SELECT id, nombre, categoria, descripcion, provenance, lifecycle, "
-                 "veces_usada FROM skills")
+            q = (
+                "SELECT id, nombre, categoria, descripcion, provenance, lifecycle, "
+                "veces_usada FROM skills"
+            )
             if solo_activas:
                 q += " WHERE lifecycle = 'active'"
             q += " ORDER BY categoria, nombre"
             async with self._pool.acquire() as con:
                 rows = await con.fetch(q)
-            return [SkillInfo(r["id"], r["nombre"], r["categoria"], r["descripcion"],
-                              r["provenance"], r["lifecycle"], r["veces_usada"]) for r in rows]
+            return [
+                SkillInfo(
+                    r["id"],
+                    r["nombre"],
+                    r["categoria"],
+                    r["descripcion"],
+                    r["provenance"],
+                    r["lifecycle"],
+                    r["veces_usada"],
+                )
+                for r in rows
+            ]
         except Exception:  # noqa: BLE001 — listar skills nunca rompe el turno
             logger.warning("error listando skills (ignoro)", exc_info=True)
             return []
@@ -93,11 +120,14 @@ class SkillStore:
         async with self._pool.acquire() as con:
             if categoria:
                 r = await con.fetchrow(
-                    "SELECT * FROM skills WHERE categoria=$1 AND nombre=$2", categoria, slug)
+                    "SELECT * FROM skills WHERE categoria=$1 AND nombre=$2", categoria, slug
+                )
             else:
                 r = await con.fetchrow(
                     "SELECT * FROM skills WHERE nombre=$1 AND lifecycle='active' "
-                    "ORDER BY actualizada_at DESC LIMIT 1", slug)
+                    "ORDER BY actualizada_at DESC LIMIT 1",
+                    slug,
+                )
         return dict(r) if r else None
 
     async def registrar_uso(self, skill_id: int) -> None:
@@ -107,7 +137,9 @@ class SkillStore:
             async with self._pool.acquire() as con:
                 await con.execute(
                     "UPDATE skills SET veces_usada = veces_usada + 1, ultimo_uso = now() "
-                    "WHERE id = $1", skill_id)
+                    "WHERE id = $1",
+                    skill_id,
+                )
         except Exception:  # noqa: BLE001
             pass
 
@@ -125,9 +157,21 @@ class SkillStore:
                     "veces_usada FROM skills WHERE lifecycle='active' AND ("
                     "  lower(nombre) ~ $1 OR lower(descripcion) ~ $1 OR lower(tags::text) ~ $1"
                     ") ORDER BY veces_usada DESC LIMIT $2",
-                    "(" + "|".join(re.escape(p) for p in palabras) + ")", limite)
-            return [SkillInfo(r["id"], r["nombre"], r["categoria"], r["descripcion"],
-                              r["provenance"], r["lifecycle"], r["veces_usada"]) for r in rows]
+                    "(" + "|".join(re.escape(p) for p in palabras) + ")",
+                    limite,
+                )
+            return [
+                SkillInfo(
+                    r["id"],
+                    r["nombre"],
+                    r["categoria"],
+                    r["descripcion"],
+                    r["provenance"],
+                    r["lifecycle"],
+                    r["veces_usada"],
+                )
+                for r in rows
+            ]
         except Exception:  # noqa: BLE001
             logger.warning("error buscando skills relevantes (ignoro)", exc_info=True)
             return []

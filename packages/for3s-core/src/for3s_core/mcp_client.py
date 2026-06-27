@@ -37,8 +37,8 @@ _MVP_TOOLSETS = "issues,pull_requests,repos"
 class MCPServerConfig:
     """Declaración de un servidor MCP: cómo arrancarlo y qué nombre tiene."""
 
-    nombre: str                       # id legible (ej. "github")
-    command: str                      # binario que lo lanza (ej. "docker", "npx")
+    nombre: str  # id legible (ej. "github")
+    command: str  # binario que lo lanza (ej. "docker", "npx")
     args: list[str] = field(default_factory=list)
     env: dict[str, str] = field(default_factory=dict)
 
@@ -47,17 +47,21 @@ def config_github(pat: str, *, read_only: bool = True) -> MCPServerConfig:
     """Config del MCP de GitHub (el primer/único server por ahora). Misma invocación
     que el cliente GitHub hardcodeado tenía — comportamiento idéntico."""
     args = [
-        "run", "-i", "--rm",
-        "-e", "GITHUB_PERSONAL_ACCESS_TOKEN",
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "GITHUB_PERSONAL_ACCESS_TOKEN",
         "ghcr.io/github/github-mcp-server",
         "stdio",
-        "--toolsets", _MVP_TOOLSETS,
+        "--toolsets",
+        _MVP_TOOLSETS,
     ]
     if read_only:
         args.append("--read-only")
     return MCPServerConfig(
-        nombre="github", command="docker", args=args,
-        env={"GITHUB_PERSONAL_ACCESS_TOKEN": pat})
+        nombre="github", command="docker", args=args, env={"GITHUB_PERSONAL_ACCESS_TOKEN": pat}
+    )
 
 
 class MCPClient:
@@ -80,7 +84,8 @@ class MCPClient:
         if self._session is not None:
             return
         server = StdioServerParameters(
-            command=self._cfg.command, args=self._cfg.args, env=self._cfg.env)
+            command=self._cfg.command, args=self._cfg.args, env=self._cfg.env
+        )
         self._stack = AsyncExitStack()
         read, write = await self._stack.enter_async_context(stdio_client(server))
         self._session = await self._stack.enter_async_context(ClientSession(read, write))
@@ -93,11 +98,13 @@ class MCPClient:
             try:
                 await self._stack.aclose()
             except RuntimeError as exc:
-                logger.warning("aclose del MCP %s desde otra tarea (no crítico): %s",
-                               self._cfg.nombre, exc)
+                logger.warning(
+                    "aclose del MCP %s desde otra tarea (no crítico): %s", self._cfg.nombre, exc
+                )
             except Exception:
-                logger.warning("error cerrando el MCP %s (no crítico)",
-                               self._cfg.nombre, exc_info=True)
+                logger.warning(
+                    "error cerrando el MCP %s (no crítico)", self._cfg.nombre, exc_info=True
+                )
             finally:
                 self._stack = None
                 self._session = None
@@ -110,8 +117,7 @@ class MCPClient:
         if self._tools_cache is None:
             resp = await self._session.list_tools()
             self._tools_cache = [
-                {"name": t.name, "description": t.description or "",
-                 "input_schema": t.inputSchema}
+                {"name": t.name, "description": t.description or "", "input_schema": t.inputSchema}
                 for t in resp.tools
             ]
         return self._tools_cache
@@ -154,11 +160,15 @@ async def ejecutar_write(pat: str, name: str, args: dict[str, Any]) -> str:
     caller la captura para avisar al usuario).
     """
     args_run = [
-        "run", "-i", "--rm",
-        "-e", "GITHUB_PERSONAL_ACCESS_TOKEN",
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "GITHUB_PERSONAL_ACCESS_TOKEN",
         "ghcr.io/github/github-mcp-server",
         "stdio",
-        "--toolsets", _MVP_TOOLSETS,
+        "--toolsets",
+        _MVP_TOOLSETS,
         # SIN --read-only: este contenedor sí puede escribir. La whitelist dura
         # del tool_loop (WRITE_TOOLS) es la que garantiza que `name` es una write
         # segura permitida; aquí ya llega validado y confirmado por el usuario.

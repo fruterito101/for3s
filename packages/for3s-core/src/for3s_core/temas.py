@@ -30,8 +30,8 @@ class HiloInfo:
 
     nombre: str
     activo: bool
-    ultimo_uso: object | None      # timestamp del último turno (o None si vacío)
-    turnos: int                    # cuántos turnos vivos tiene ese hilo
+    ultimo_uso: object | None  # timestamp del último turno (o None si vacío)
+    turnos: int  # cuántos turnos vivos tiene ese hilo
 
 
 def normalizar_nombre(nombre: str) -> str:
@@ -60,7 +60,8 @@ class TemaStore:
         try:
             async with self._pool.acquire() as con:
                 t = await con.fetchval(
-                    "SELECT nombre FROM temas WHERE user_id = $1 AND activo", user_id,
+                    "SELECT nombre FROM temas WHERE user_id = $1 AND activo",
+                    user_id,
                 )
             return t or TEMA_DEFAULT
         except Exception:  # noqa: BLE001 — los temas nunca deben tumbar el bot
@@ -83,7 +84,8 @@ class TemaStore:
                     "INSERT INTO temas (user_id, nombre, activo) VALUES ($1, $2, true) "
                     "ON CONFLICT (user_id, nombre) DO UPDATE "
                     "SET activo = true, ultimo_uso = now()",
-                    user_id, slug,
+                    user_id,
+                    slug,
                 )
         logger.info("[temas] user=%s -> tema activo '%s'", user_id, slug)
         return slug
@@ -124,13 +126,17 @@ class TemaStore:
                     "FROM episodes_events WHERE session_id = $1 AND deleted_at IS NULL",
                     sid,
                 )
-                infos.append(HiloInfo(
-                    nombre=nombre, activo=nombre in activos,
-                    ultimo_uso=row["ult"] if row else None,
-                    turnos=row["n"] if row else 0,
-                ))
+                infos.append(
+                    HiloInfo(
+                        nombre=nombre,
+                        activo=nombre in activos,
+                        ultimo_uso=row["ult"] if row else None,
+                        turnos=row["n"] if row else 0,
+                    )
+                )
         # orden: activo primero, luego por último uso desc (None al final)
         from datetime import datetime
+
         _epoch = datetime(1970, 1, 1, tzinfo=UTC)
         infos.sort(key=lambda h: (not h.activo, -(h.ultimo_uso or _epoch).timestamp()))
         return infos

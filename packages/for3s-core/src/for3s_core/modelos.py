@@ -21,10 +21,10 @@ logger = logging.getLogger("for3s.modelos")
 class ModeloInfo:
     """Un modelo del catálogo: id de API + cómo se presenta (estilo Claude Code)."""
 
-    id: str           # string exacto de la API (claude-sonnet-4-6)
-    nombre: str       # nombre corto para mostrar (Sonnet)
-    desc: str         # descripción del rol (Efficient for routine tasks)
-    rol: str          # rapido | routine | complejo — para el futuro H7
+    id: str  # string exacto de la API (claude-sonnet-4-6)
+    nombre: str  # nombre corto para mostrar (Sonnet)
+    desc: str  # descripción del rol (Efficient for routine tasks)
+    rol: str  # rapido | routine | complejo — para el futuro H7
 
 
 # CATÁLOGO de candidatos (los que el /model de Claude Code muestra + conocidos).
@@ -50,7 +50,10 @@ def info_de(model_id: str) -> ModeloInfo | None:
 
 
 async def verificar_disponibles(
-    token: str, oauth: bool, *, espaciar_seg: float = 22.0,
+    token: str,
+    oauth: bool,
+    *,
+    espaciar_seg: float = 22.0,
 ) -> list[str]:
     """Pinguea cada modelo del catálogo con el token y devuelve los que RESPONDEN.
     Espaciado para no topar el rate-limit instantáneo del OAuth. Pensado para correr
@@ -78,8 +81,10 @@ async def get_seleccionado(pool, session_id: str) -> str:
     try:
         async with pool.acquire() as conn:
             raw = await conn.fetchval(
-                f"SELECT meta -> '{_META_KEY}' AS m FROM sessions WHERE id = $1", session_id)
+                f"SELECT meta -> '{_META_KEY}' AS m FROM sessions WHERE id = $1", session_id
+            )
         import json
+
         if raw:
             val = json.loads(raw) if isinstance(raw, str) else raw
             if isinstance(val, str) and info_de(val):
@@ -95,11 +100,13 @@ async def set_seleccionado(pool, session_id: str, model_id: str) -> bool:
     if not info_de(model_id):
         return False
     import json
+
     async with pool.acquire() as conn:
         await conn.execute(
             f"UPDATE sessions SET meta = jsonb_set(meta, '{{{_META_KEY}}}', $2::jsonb) "
             "WHERE id = $1",
-            session_id, json.dumps(model_id),
+            session_id,
+            json.dumps(model_id),
         )
     logger.info("[modelos] seleccionado: %s (sesión %s)", model_id, session_id)
     return True

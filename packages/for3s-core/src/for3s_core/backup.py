@@ -32,9 +32,9 @@ _load_dotenv(Path.cwd() / ".env")
 
 # Carpeta de backups (la misma que usamos a mano en H5/H6).
 BACKUP_DIR = Path(os.environ.get("FOR3S_BACKUP_DIR", str(Path.home() / "for3s-backups")))
-PREFIJO = "auto_for3s_"            # nombre de los backups automáticos
+PREFIJO = "auto_for3s_"  # nombre de los backups automáticos
 RETENER = int(os.environ.get("FOR3S_BACKUP_RETENER", "14"))  # cuántos conservar
-TAMANO_MINIMO_BYTES = 10_000       # un dump válido pesa más que esto (anti-truncado)
+TAMANO_MINIMO_BYTES = 10_000  # un dump válido pesa más que esto (anti-truncado)
 
 # OFF-SITE (el "1" del 3-2-1): copia cada backup a OTRA máquina fuera del server.
 # Destino vía SSH (rsync). Configurable por env. Vacío = off-site desactivado.
@@ -66,8 +66,19 @@ def hacer_backup(database_url: str) -> Path:
 
     env = dict(os.environ, PGPASSWORD=info["pw"])
     cmd = [
-        "pg_dump", "-U", info["user"], "-h", info["host"], "-p", info["port"],
-        "-d", info["db"], "--no-owner", "--no-privileges", "-f", str(destino),
+        "pg_dump",
+        "-U",
+        info["user"],
+        "-h",
+        info["host"],
+        "-p",
+        info["port"],
+        "-d",
+        info["db"],
+        "--no-owner",
+        "--no-privileges",
+        "-f",
+        str(destino),
     ]
     subprocess.run(cmd, env=env, check=True, capture_output=True, timeout=300)
 
@@ -107,13 +118,16 @@ def copiar_offsite(ruta: Path) -> bool:
         )
         subprocess.run(
             ["rsync", "-az", "-e", ssh_cmd, str(ruta), OFFSITE_DESTINO],
-            check=True, capture_output=True, timeout=300,
+            check=True,
+            capture_output=True,
+            timeout=300,
         )
         logger.info("[backup] off-site OK → %s (%s)", OFFSITE_DESTINO, ruta.name)
         return True
     except Exception as e:  # noqa: BLE001 — off-site nunca rompe el backup local
         logger.warning(
-            "[backup] off-site FALLÓ (no crítico, el local sí se hizo): %s", type(e).__name__,
+            "[backup] off-site FALLÓ (no crítico, el local sí se hizo): %s",
+            type(e).__name__,
         )
         return False
 

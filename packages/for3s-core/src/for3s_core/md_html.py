@@ -54,7 +54,9 @@ def md_a_html_telegram(texto: str) -> str:
     # 2+ líneas consecutivas que empiezan (con espacios opcionales) por |
     texto = re.sub(
         r"(?:^[ \t]*\|.*\|[ \t]*$\n?){2,}",
-        _guardar_tabla, texto, flags=re.MULTILINE,
+        _guardar_tabla,
+        texto,
+        flags=re.MULTILINE,
     )
 
     # 2) PROTEGER código inline `...`
@@ -98,5 +100,3 @@ def md_a_html_telegram(texto: str) -> str:
     texto = re.sub(r"\x00BLOQUE(\d+)\x00", _restaurar_bloque, texto)
 
     return texto
-
-

@@ -27,7 +27,7 @@ logger = logging.getLogger("for3s.dmn.tasks")
 
 # Cuántos items procesa una corrida (batch, no infinito — como el sueño consolida el día).
 EMBED_BATCH = 200
-CONSOLIDAR_UMBRAL = 20   # ≥20 episodios sin consolidar = vale correr el CLS (R5 §3.3)
+CONSOLIDAR_UMBRAL = 20  # ≥20 episodios sin consolidar = vale correr el CLS (R5 §3.3)
 
 
 # ───────────────────────── 1. embedding_precompute (LOW · $0) ─────────────────────────
@@ -37,7 +37,8 @@ async def trigger_embedding_precompute(pool, workspace: str) -> bool:
         async with pool.acquire() as con:
             n = await con.fetchval(
                 "SELECT count(*) FROM episodes_events "
-                "WHERE embedding IS NULL AND deleted_at IS NULL")
+                "WHERE embedding IS NULL AND deleted_at IS NULL"
+            )
         return (n or 0) > 0
     except Exception:  # noqa: BLE001
         return False
@@ -47,21 +48,24 @@ async def action_embedding_precompute(pool, workspace: str) -> DMNTaskResult:
     """Embebe los turnos pendientes (reusa memory.embeddear_turno). $0 (BGE-M3 local),
     idempotente, cero riesgo. Procesa en batch para no acaparar."""
     from for3s_core import memory
+
     creados = 0
     try:
         async with pool.acquire() as con:
             pend = await con.fetch(
                 "SELECT session_id, seq, content FROM episodes_events "
                 "WHERE embedding IS NULL AND deleted_at IS NULL "
-                "ORDER BY created_at DESC LIMIT $1", EMBED_BATCH)
+                "ORDER BY created_at DESC LIMIT $1",
+                EMBED_BATCH,
+            )
         for r in pend:
-            ok = await memory.embeddear_turno(
-                pool, r["session_id"], r["seq"], r["content"])
+            ok = await memory.embeddear_turno(pool, r["session_id"], r["seq"], r["content"])
             if ok:
                 creados += 1
     except Exception as e:  # noqa: BLE001
-        return DMNTaskResult(outcome={"embeddings_created": creados},
-                             motivo=f"parcial: {type(e).__name__}")
+        return DMNTaskResult(
+            outcome={"embeddings_created": creados}, motivo=f"parcial: {type(e).__name__}"
+        )
     return DMNTaskResult(outcome={"embeddings_created": creados}, costo_usd=0.0)
 
 
@@ -72,7 +76,8 @@ async def trigger_memory_consolidation(pool, workspace: str) -> bool:
         async with pool.acquire() as con:
             n = await con.fetchval(
                 "SELECT count(*) FROM episodes_events "
-                "WHERE consolidated_to_kg = false AND deleted_at IS NULL")
+                "WHERE consolidated_to_kg = false AND deleted_at IS NULL"
+            )
         return (n or 0) >= CONSOLIDAR_UMBRAL
     except Exception:  # noqa: BLE001
         return False
@@ -84,13 +89,17 @@ async def action_memory_consolidation(pool, workspace: str) -> DMNTaskResult:
     dry_run=False: escribe conceptos al grafo de verdad (con su anti-429 interno)."""
     from for3s_core import consolidator
     from for3s_core.tasks import SESSION_OWNER
+
     try:
         r = await consolidator.consolidar(pool, SESSION_OWNER, dry_run=False)
         return DMNTaskResult(
-            outcome={"conceptos_escritos": r.conceptos_escritos,
-                     "episodios_consolidados": r.episodios_marcados,
-                     "clusters": r.clusters},
-            costo_usd=0.10)
+            outcome={
+                "conceptos_escritos": r.conceptos_escritos,
+                "episodios_consolidados": r.episodios_marcados,
+                "clusters": r.clusters,
+            },
+            costo_usd=0.10,
+        )
     except Exception as e:  # noqa: BLE001
         return DMNTaskResult(outcome={}, motivo=f"error CLS: {type(e).__name__}")
 
@@ -105,6 +114,7 @@ async def trigger_cache_prewarming(pool, workspace: str) -> bool:
     'sin señal suficiente'."""
     try:
         from for3s_core import cache
+
         stats = getattr(cache, "stats_recientes", None)
         if stats is None:
             return False  # cache.py aún no expone stats → no corre (honesto)
@@ -120,7 +130,8 @@ async def action_cache_prewarming(pool, workspace: str) -> DMNTaskResult:
     activa cuando haya patrones identificados. Honesto: no inventa warming."""
     return DMNTaskResult(
         outcome={"patterns_warmed": 0, "estado": "pendiente_infra_stats"},
-        motivo="cache_prewarming v1: requiere stats de hit/miss acumuladas")
+        motivo="cache_prewarming v1: requiere stats de hit/miss acumuladas",
+    )
 
 
 # ───────────────────────── 4. routing_learning (STUB honesto) ─────────────────────────
@@ -133,8 +144,10 @@ async def trigger_routing_learning(pool, workspace: str) -> bool:
 
 async def action_routing_learning(pool, workspace: str) -> DMNTaskResult:
     """No-op honesto (no debería llamarse mientras el trigger sea False)."""
-    return DMNTaskResult(outcome={"estado": "sin_router_multimodelo"},
-                         motivo="routing_learning: H7 enrutamiento no activo")
+    return DMNTaskResult(
+        outcome={"estado": "sin_router_multimodelo"},
+        motivo="routing_learning: H7 enrutamiento no activo",
+    )
 
 
 # ───────────── 5. eval_regression_detection (v1 métrica simple) ─────────────
@@ -145,7 +158,8 @@ async def trigger_eval_regression(pool, workspace: str) -> bool:
         async with pool.acquire() as con:
             ya_hoy = await con.fetchval(
                 "SELECT count(*) FROM dmn_corridas WHERE task='eval_regression_detection' "
-                "AND corrio=true AND creado_at >= date_trunc('day', now())")
+                "AND corrio=true AND creado_at >= date_trunc('day', now())"
+            )
         return (ya_hoy or 0) == 0  # solo una vez al día
     except Exception:  # noqa: BLE001
         return False
@@ -158,19 +172,32 @@ async def action_eval_regression(pool, workspace: str) -> DMNTaskResult:
     NO cambia nada (solo detecta). El golden set formal es deuda documentada."""
     try:
         async with pool.acquire() as con:
-            total = await con.fetchval(
-                "SELECT count(*) FROM episodes_events WHERE role='assistant' "
-                "AND created_at >= now()-interval '24 hours' AND deleted_at IS NULL") or 0
-            vacios = await con.fetchval(
-                "SELECT count(*) FROM episodes_events WHERE role='assistant' "
-                "AND created_at >= now()-interval '24 hours' AND deleted_at IS NULL "
-                "AND (content IS NULL OR length(trim(content)) < 2)") or 0
+            total = (
+                await con.fetchval(
+                    "SELECT count(*) FROM episodes_events WHERE role='assistant' "
+                    "AND created_at >= now()-interval '24 hours' AND deleted_at IS NULL"
+                )
+                or 0
+            )
+            vacios = (
+                await con.fetchval(
+                    "SELECT count(*) FROM episodes_events WHERE role='assistant' "
+                    "AND created_at >= now()-interval '24 hours' AND deleted_at IS NULL "
+                    "AND (content IS NULL OR length(trim(content)) < 2)"
+                )
+                or 0
+            )
         ratio = (vacios / total) if total else 0.0
         degradacion = ratio > 0.15  # >15% respuestas vacías = señal de alarma
         return DMNTaskResult(
-            outcome={"respuestas_24h": total, "vacias": vacios,
-                     "ratio_vacias": round(ratio, 3), "degradacion": degradacion},
-            motivo="v1 métrica simple (golden set formal = deuda)")
+            outcome={
+                "respuestas_24h": total,
+                "vacias": vacios,
+                "ratio_vacias": round(ratio, 3),
+                "degradacion": degradacion,
+            },
+            motivo="v1 métrica simple (golden set formal = deuda)",
+        )
     except Exception as e:  # noqa: BLE001
         return DMNTaskResult(outcome={}, motivo=f"error: {type(e).__name__}")
 
@@ -190,19 +217,27 @@ def _provider_para(modelo: str):
     """Crea un provider LLM (OAuth-safe) para una task generativa. En worker, sin bot."""
     from for3s_core.config import load_settings
     from for3s_core.llm import ClaudeProvider
+
     s = load_settings()
     return ClaudeProvider(token=s.anthropic_token, oauth=s.is_oauth, model=modelo)
 
 
-async def _guardar_propuesta(pool, *, task: str, tipo: str, titulo: str,
-                             contenido: str, costo: float, workspace: str) -> int | None:
+async def _guardar_propuesta(
+    pool, *, task: str, tipo: str, titulo: str, contenido: str, costo: float, workspace: str
+) -> int | None:
     """Deja una propuesta generativa para el dueño (estado=pendiente). Defensivo."""
     try:
         async with pool.acquire() as con:
             return await con.fetchval(
                 "INSERT INTO dmn_propuestas (workspace, task, tipo, titulo, contenido, "
                 " costo_usd) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id",
-                workspace, task, tipo, titulo[:200], contenido, costo)
+                workspace,
+                task,
+                tipo,
+                titulo[:200],
+                contenido,
+                costo,
+            )
     except Exception:  # noqa: BLE001
         logger.warning("no pude guardar propuesta DMN de %s", task, exc_info=True)
         return None
@@ -214,12 +249,14 @@ async def trigger_pattern_detection(pool, workspace: str) -> bool:
     Reusa el umbral del motor de skills (si la auto-gen del governor está ON)."""
     try:
         from for3s_core.governor import SkillEcosystemGovernor
+
         if not await SkillEcosystemGovernor(pool).autogen_permitida():
             return False  # el governor de skills manda para pattern→skill
         async with pool.acquire() as con:
             n = await con.fetchval(
                 "SELECT count(*) FROM episodes_events "
-                "WHERE created_at >= now()-interval '24 hours' AND deleted_at IS NULL")
+                "WHERE created_at >= now()-interval '24 hours' AND deleted_at IS NULL"
+            )
         return (n or 0) >= 10
     except Exception:  # noqa: BLE001
         return False
@@ -231,12 +268,15 @@ async def action_pattern_detection(pool, workspace: str) -> DMNTaskResult:
     dueño. Cero duplicación: el motor de skills ya hace todo el camino seguro."""
     from for3s_core.aprende import proponer_skill_auto
     from for3s_core.tasks import SESSION_OWNER
+
     try:
         prov = _provider_para("claude-sonnet-4-6")
         res = await proponer_skill_auto(pool, prov, SESSION_OWNER, creada_por=None)
         return DMNTaskResult(
             outcome={"skill_propuesta": res.nombre or None, "ok": res.ok},
-            costo_usd=0.05, motivo=res.mensaje)
+            costo_usd=0.05,
+            motivo=res.mensaje,
+        )
     except Exception as e:  # noqa: BLE001
         return DMNTaskResult(outcome={}, motivo=f"error: {type(e).__name__}")
 
@@ -259,10 +299,12 @@ async def trigger_hypothesis_generation(pool, workspace: str) -> bool:
         async with pool.acquire() as con:
             ya = await con.fetchval(
                 "SELECT count(*) FROM dmn_corridas WHERE task='hypothesis_generation' "
-                "AND corrio=true AND creado_at >= date_trunc('day', now())")
+                "AND corrio=true AND creado_at >= date_trunc('day', now())"
+            )
             mat = await con.fetchval(
                 "SELECT count(*) FROM episodes_events "
-                "WHERE created_at >= now()-interval '48 hours' AND deleted_at IS NULL")
+                "WHERE created_at >= now()-interval '48 hours' AND deleted_at IS NULL"
+            )
         return (ya or 0) == 0 and (mat or 0) >= 10
     except Exception:  # noqa: BLE001
         return False
@@ -276,16 +318,19 @@ async def action_hypothesis_generation(pool, workspace: str) -> DMNTaskResult:
 
     from for3s_core import memory
     from for3s_core.tasks import SESSION_OWNER
+
     try:
         turnos = await memory.load_history(pool, SESSION_OWNER, last_n=20)
         if not turnos:
             return DMNTaskResult(outcome={"generadas": 0}, motivo="sin material")
         material = "\n".join(
             f"{'Usuario' if t.role == 'user' else 'For3s'}: {(t.content or '')[:200]}"
-            for t in turnos)
+            for t in turnos
+        )
         prov = _provider_para(HYP_MODEL)
         resp = await asyncio.to_thread(
-            prov.complete, _PROMPT_HYP + material, system="", max_tokens=HYP_MAX_TOKENS)
+            prov.complete, _PROMPT_HYP + material, system="", max_tokens=HYP_MAX_TOKENS
+        )
         txt = (getattr(resp, "text", "") or "").strip()
         txt = txt.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
         try:
@@ -293,12 +338,20 @@ async def action_hypothesis_generation(pool, workspace: str) -> DMNTaskResult:
         except (json.JSONDecodeError, TypeError):
             d = {}
         if not d.get("vale"):
-            return DMNTaskResult(outcome={"generadas": 0}, costo_usd=0.50,
-                                 motivo="el modelo no vio una hipótesis seria")
+            return DMNTaskResult(
+                outcome={"generadas": 0},
+                costo_usd=0.50,
+                motivo="el modelo no vio una hipótesis seria",
+            )
         pid = await _guardar_propuesta(
-            pool, task="hypothesis_generation", tipo="hipotesis",
-            titulo=d.get("titulo", "Hipótesis"), contenido=d.get("hipotesis", ""),
-            costo=0.50, workspace=workspace)
+            pool,
+            task="hypothesis_generation",
+            tipo="hipotesis",
+            titulo=d.get("titulo", "Hipótesis"),
+            contenido=d.get("hipotesis", ""),
+            costo=0.50,
+            workspace=workspace,
+        )
         return DMNTaskResult(outcome={"generadas": 1, "propuesta_id": pid}, costo_usd=0.50)
     except Exception as e:  # noqa: BLE001
         return DMNTaskResult(outcome={}, motivo=f"error: {type(e).__name__}")
@@ -315,8 +368,10 @@ async def trigger_prompt_improvement(pool, workspace: str) -> bool:
 async def action_prompt_improvement(pool, workspace: str) -> DMNTaskResult:
     """No-op honesto. Cuando se construya (con AC3), propondrá mejoras de prompt a
     dmn_propuestas, NUNCA auto-editará FOR3S_ROLE."""
-    return DMNTaskResult(outcome={"estado": "pendiente_AC3"},
-                         motivo="prompt_improvement: requiere diseño AUTO-CONCIENCIA AC3")
+    return DMNTaskResult(
+        outcome={"estado": "pendiente_AC3"},
+        motivo="prompt_improvement: requiere diseño AUTO-CONCIENCIA AC3",
+    )
 
 
 # ── registro en el motor ──
@@ -324,28 +379,76 @@ async def action_prompt_improvement(pool, workspace: str) -> DMNTaskResult:
 # Ligeras de día: embedding, cache, routing.
 def registrar_tasks() -> None:
     """Registra las 8 tasks (5 housekeeping + 3 generativas). Idempotente."""
-    dmn.registrar(DMNTask("embedding_precompute", CLASE_HOUSEKEEPING,
-                          trigger_embedding_precompute, action_embedding_precompute))
-    dmn.registrar(DMNTask("cache_prewarming", CLASE_HOUSEKEEPING,
-                          trigger_cache_prewarming, action_cache_prewarming))
-    dmn.registrar(DMNTask("memory_consolidation", CLASE_HOUSEKEEPING,
-                          trigger_memory_consolidation, action_memory_consolidation,
-                          solo_noche=True))  # usa LLM → solo de noche
-    dmn.registrar(DMNTask("routing_learning", CLASE_HOUSEKEEPING,
-                          trigger_routing_learning, action_routing_learning))
-    dmn.registrar(DMNTask("eval_regression_detection", CLASE_HOUSEKEEPING,
-                          trigger_eval_regression, action_eval_regression,
-                          solo_noche=True))
+    dmn.registrar(
+        DMNTask(
+            "embedding_precompute",
+            CLASE_HOUSEKEEPING,
+            trigger_embedding_precompute,
+            action_embedding_precompute,
+        )
+    )
+    dmn.registrar(
+        DMNTask(
+            "cache_prewarming",
+            CLASE_HOUSEKEEPING,
+            trigger_cache_prewarming,
+            action_cache_prewarming,
+        )
+    )
+    dmn.registrar(
+        DMNTask(
+            "memory_consolidation",
+            CLASE_HOUSEKEEPING,
+            trigger_memory_consolidation,
+            action_memory_consolidation,
+            solo_noche=True,
+        )
+    )  # usa LLM → solo de noche
+    dmn.registrar(
+        DMNTask(
+            "routing_learning",
+            CLASE_HOUSEKEEPING,
+            trigger_routing_learning,
+            action_routing_learning,
+        )
+    )
+    dmn.registrar(
+        DMNTask(
+            "eval_regression_detection",
+            CLASE_HOUSEKEEPING,
+            trigger_eval_regression,
+            action_eval_regression,
+            solo_noche=True,
+        )
+    )
     # generativas — alto riesgo, solo de noche, requieren generativas_on
-    dmn.registrar(DMNTask("pattern_detection", CLASE_GENERATIVA,
-                          trigger_pattern_detection, action_pattern_detection,
-                          solo_noche=True))
-    dmn.registrar(DMNTask("hypothesis_generation", CLASE_GENERATIVA,
-                          trigger_hypothesis_generation, action_hypothesis_generation,
-                          solo_noche=True))
-    dmn.registrar(DMNTask("prompt_improvement", CLASE_GENERATIVA,
-                          trigger_prompt_improvement, action_prompt_improvement,
-                          solo_noche=True))
+    dmn.registrar(
+        DMNTask(
+            "pattern_detection",
+            CLASE_GENERATIVA,
+            trigger_pattern_detection,
+            action_pattern_detection,
+            solo_noche=True,
+        )
+    )
+    dmn.registrar(
+        DMNTask(
+            "hypothesis_generation",
+            CLASE_GENERATIVA,
+            trigger_hypothesis_generation,
+            action_hypothesis_generation,
+            solo_noche=True,
+        )
+    )
+    dmn.registrar(
+        DMNTask(
+            "prompt_improvement",
+            CLASE_GENERATIVA,
+            trigger_prompt_improvement,
+            action_prompt_improvement,
+            solo_noche=True,
+        )
+    )
     logger.info("[dmn.tasks] 8 tasks registradas (5 housekeeping + 3 generativas)")
 
 

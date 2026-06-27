@@ -28,9 +28,9 @@ from dataclasses import dataclass
 logger = logging.getLogger("for3s.cost")
 
 # --- Ratios y topes (del diseño LOCKED §5.3.4) -----------------------------
-SAFETY_BUFFER_RATIO = 1.3          # margen al estimar el costo de una corrida
-WARNING_THRESHOLD_RATIO = 0.80     # 80% del cap → warning (LOCKED: 0.80)
-EMERGENCY_ABORT_RATIO = 0.95       # 95% del cap → abort (LOCKED: 0.95)
+SAFETY_BUFFER_RATIO = 1.3  # margen al estimar el costo de una corrida
+WARNING_THRESHOLD_RATIO = 0.80  # 80% del cap → warning (LOCKED: 0.80)
+EMERGENCY_ABORT_RATIO = 0.95  # 95% del cap → abort (LOCKED: 0.95)
 
 # Tope por CORRIDA (lo que SÍ aplica hoy): máximo de llamadas LLM por análisis del
 # equipo. Protege el rate-limit/abuso aunque la suscripción sea plana. 5 specialists
@@ -43,14 +43,14 @@ MAX_TOKENS_POR_CORRIDA = 15_000
 # --- Budget en $ / mensual / por-workspace (capa 7): PREPARADO pero INACTIVO ---
 # Hoy con OAuth de suscripción (tarifa plana) no hay costo por token → sin cap en $.
 # Al migrar a API key de pago / clientes, poner CAP_USD_MENSUAL > 0 por workspace.
-CAP_USD_MENSUAL_DEFAULT = 0.0      # 0 = sin tope en $ (no aplica a suscripción)
+CAP_USD_MENSUAL_DEFAULT = 0.0  # 0 = sin tope en $ (no aplica a suscripción)
 
 
 @dataclass
 class PresupuestoCorrida:
     """Estado de costo de UNA corrida del equipo (capa 1/2/3)."""
 
-    workspace_id: str = "default"          # capa 7: namespaced (single-user = default)
+    workspace_id: str = "default"  # capa 7: namespaced (single-user = default)
     max_llamadas: int = MAX_LLAMADAS_POR_CORRIDA
     max_tokens: int = MAX_TOKENS_POR_CORRIDA
     cap_usd_mensual: float = CAP_USD_MENSUAL_DEFAULT
@@ -81,8 +81,9 @@ class PresupuestoCorrida:
         if ratio >= EMERGENCY_ABORT_RATIO:
             return "emergency"
         if ratio >= WARNING_THRESHOLD_RATIO:
-            logger.warning("[cost] corrida %s al %.0f%% del budget de tokens",
-                           self.workspace_id, ratio * 100)
+            logger.warning(
+                "[cost] corrida %s al %.0f%% del budget de tokens", self.workspace_id, ratio * 100
+            )
             return "warning"
         return "ok"
 
@@ -93,9 +94,11 @@ class PresupuestoCorrida:
     # --- capa 6: client visibility (reporte legible) ---
     def reporte(self) -> str:
         """Resumen de costo para mostrar al usuario (capa 6 client visibility)."""
-        return (f"💰 costo: {self.llamadas} llamadas · {self.total_tokens} tokens "
-                f"(in {self.tokens_in} / out {self.tokens_out})"
-                + (f" · ⛔ abortada: {self.motivo_abort}" if self.abortada else ""))
+        return (
+            f"💰 costo: {self.llamadas} llamadas · {self.total_tokens} tokens "
+            f"(in {self.tokens_in} / out {self.tokens_out})"
+            + (f" · ⛔ abortada: {self.motivo_abort}" if self.abortada else "")
+        )
 
 
 # --- capa 7: workspace isolation (preparado, single-user usa default) ---
@@ -110,7 +113,8 @@ def gasto_mensual(workspace_id: str = "default") -> float:
 
 
 def hay_budget_mensual(
-    workspace_id: str = "default", cap_usd: float = CAP_USD_MENSUAL_DEFAULT,
+    workspace_id: str = "default",
+    cap_usd: float = CAP_USD_MENSUAL_DEFAULT,
 ) -> bool:
     """¿Queda budget mensual en $? (capa 7). Si cap_usd=0 (suscripción) → siempre True
     (no hay tope en dinero). Al activar pago, pasar cap_usd>0."""

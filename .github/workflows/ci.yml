@@ -10,6 +10,9 @@ jobs:
     name: Lint + Types + Tests
     runs-on: ubuntu-latest
     services:
+      # BD del CI: pgvector/pgvector:pg16 trae pgvector + pgcrypto (lo que usan las
+      # migraciones — solo hacen CREATE EXTENSION pgcrypto). AGE no hace falta aquí:
+      # los tests de integración que lo tocarían se saltan (skip) si no está.
       postgres:
         image: pgvector/pgvector:pg16
         env:
@@ -30,18 +33,21 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.12"
-      - name: Habilitar extensiones (pgcrypto)
+      - name: Habilitar extensiones (pgcrypto + vector)
         run: |
-          PGPASSWORD=for3s_ci psql -h localhost -U for3s -d for3s -c "CREATE EXTENSION IF NOT EXISTS pgcrypto;"
+          sudo apt-get update && sudo apt-get install -y postgresql-client
+          PGPASSWORD=for3s_ci psql -h localhost -U for3s -d for3s -c "CREATE EXTENSION IF NOT EXISTS pgcrypto; CREATE EXTENSION IF NOT EXISTS vector;"
       - name: Sync deps
         run: uv sync --all-packages
       - name: Lint (ruff)
         run: uv run ruff check .
       - name: Format check (ruff)
         run: uv run ruff format --check .
-      - name: Types (ty)
+      # #2: ty es experimental → informativo, NO bloquea el CI (ruff+pytest dan la garantía).
+      - name: Types (ty, informativo)
         run: uv run ty check
-      - name: Tests (pytest, incluye integración contra Postgres)
+        continue-on-error: true
+      - name: Tests (pytest)
         run: uv run pytest -q
 
   security:
@@ -50,8 +56,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
+      # #3: bandit con la config del pyproject (skips justificados); sigue cazando lo demás.
       - name: Bandit scan
-        run: uvx bandit -r packages src scripts -ll
+        run: uvx bandit -c pyproject.toml -r packages src scripts -ll
 
   pilar3-gate:
     name: Pilar 3 Gate (skeleton)

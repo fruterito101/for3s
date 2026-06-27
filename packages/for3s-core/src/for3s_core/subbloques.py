@@ -52,10 +52,10 @@ PRESUPUESTO_SEGUNDOS = 300  # 5 min: si se excede, corta y reporta lo leído
 CUOTA_CATEGORIA = {
     "readme": None,  # README.md — SIEMPRE completo, va PRIMERO (el mapa del repo)
     "config": None,  # package.json, pyproject, Dockerfile, CI — completo (panorama deps)
-    "doc": 25,       # *.md, docs/ — completo hasta tope alto de seguridad
-    "src": 120,      # CÓDIGO FUENTE — por recencia (reciente→viejo)
-    "test": 10,      # tests/ — por recencia, muestra amplia
-    "otro": 3,       # lo demás — mínimo
+    "doc": 25,  # *.md, docs/ — completo hasta tope alto de seguridad
+    "src": 120,  # CÓDIGO FUENTE — por recencia (reciente→viejo)
+    "test": 10,  # tests/ — por recencia, muestra amplia
+    "otro": 3,  # lo demás — mínimo
 }
 # MODO SIMPLE (2026-06-17): MÁXIMO contexto en MÍNIMO tiempo, para que un
 # NO programador entienda qué es el proyecto, cómo va y lo esencial (+ vulns).
@@ -64,9 +64,9 @@ CUOTA_CATEGORIA = {
 CUOTA_CATEGORIA_SIMPLE = {
     "readme": None,  # completo (el mapa)
     "config": None,  # completa (panorama de deps/stack)
-    "doc": 5,        # pasada de contexto, no a detalle
-    "src": 8,        # solo los archivos clave (entry/data/principales)
-    "test": 1,       # solo señal de que hay tests
+    "doc": 5,  # pasada de contexto, no a detalle
+    "src": 8,  # solo los archivos clave (entry/data/principales)
+    "test": 1,  # solo señal de que hay tests
     "otro": 1,
 }
 # Orden en que se PROCESAN las categorías (= orden de lectura de el dueño)
@@ -80,22 +80,78 @@ MAX_PROFUNDIDAD = 3  # subir a 3: src/components/... suele estar a 2-3 niveles
 LOTE = 3  # archivos en paralelo por vuelta (más rápido; el sistema avisa si topa 429)
 
 _IGNORAR_EXT = (
-    ".lock", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".webp",
-    ".pdf", ".zip", ".tar", ".gz", ".woff", ".woff2", ".ttf", ".eot",
-    ".mp4", ".mp3", ".min.js", ".min.css", ".map",
+    ".lock",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".svg",
+    ".ico",
+    ".webp",
+    ".pdf",
+    ".zip",
+    ".tar",
+    ".gz",
+    ".woff",
+    ".woff2",
+    ".ttf",
+    ".eot",
+    ".mp4",
+    ".mp3",
+    ".min.js",
+    ".min.css",
+    ".map",
 )
 _IGNORAR_NOMBRE = ("__init__.py",)  # vacíos; el MCP los da como tipo resource
 _IGNORAR_DIR = (
-    "node_modules", ".git", "dist", "build", "vendor", "__pycache__",
-    ".venv", "_generated",  # convex/_generated: código autogenerado, ruido
+    "node_modules",
+    ".git",
+    "dist",
+    "build",
+    "vendor",
+    "__pycache__",
+    ".venv",
+    "_generated",  # convex/_generated: código autogenerado, ruido
 )
 
 # patrones para clasificar por categoría
-_EXT_CODIGO = (".ts", ".tsx", ".js", ".jsx", ".py", ".go", ".rs", ".java",
-               ".rb", ".php", ".c", ".cpp", ".h", ".cs", ".swift", ".kt", ".vue", ".svelte")
-_CONFIG_HINTS = ("package.json", "pyproject.toml", "cargo.toml", "go.mod",
-                 "requirements.txt", "dockerfile", "makefile", ".config.",
-                 "tsconfig", "tailwind", "postcss", "vercel.json", ".yml", ".yaml", ".toml")
+_EXT_CODIGO = (
+    ".ts",
+    ".tsx",
+    ".js",
+    ".jsx",
+    ".py",
+    ".go",
+    ".rs",
+    ".java",
+    ".rb",
+    ".php",
+    ".c",
+    ".cpp",
+    ".h",
+    ".cs",
+    ".swift",
+    ".kt",
+    ".vue",
+    ".svelte",
+)
+_CONFIG_HINTS = (
+    "package.json",
+    "pyproject.toml",
+    "cargo.toml",
+    "go.mod",
+    "requirements.txt",
+    "dockerfile",
+    "makefile",
+    ".config.",
+    "tsconfig",
+    "tailwind",
+    "postcss",
+    "vercel.json",
+    ".yml",
+    ".yaml",
+    ".toml",
+)
 
 
 def _categoria(ruta: str) -> str:
@@ -104,11 +160,20 @@ def _categoria(ruta: str) -> str:
     # README de la RAÍZ va PRIMERO, categoría propia (el mapa del repo, pedido de diseño).
     if nombre in ("readme.md", "readme") and "/" not in ruta.strip("/"):
         return "readme"
-    if (r.startswith("test") or "/test" in r or nombre.startswith("test_")
-            or ".test." in nombre or ".spec." in nombre):
+    if (
+        r.startswith("test")
+        or "/test" in r
+        or nombre.startswith("test_")
+        or ".test." in nombre
+        or ".spec." in nombre
+    ):
         return "test"
-    if (nombre.endswith(".md") or r.startswith("docs/") or "/docs/" in r
-            or nombre.startswith("readme")):
+    if (
+        nombre.endswith(".md")
+        or r.startswith("docs/")
+        or "/docs/" in r
+        or nombre.startswith("readme")
+    ):
         return "doc"  # otros READMEs (de subcarpetas) y docs
     if any(h in nombre for h in _CONFIG_HINTS):
         return "config"
@@ -136,21 +201,45 @@ def _capa_ejecucion(ruta: str) -> int:
     r = ruta.lower()
     n = r.rsplit("/", 1)[-1]
     # CAPA 0 — entry-point (lo primero que ejecuta/renderiza la app)
-    if (n in ("layout.tsx", "layout.ts", "layout.jsx", "page.tsx", "page.ts", "page.jsx")
-            or n.startswith(("main.", "index.", "app.", "server.", "__main__"))
-            or "app/layout" in r or "app/page" in r):
+    if (
+        n in ("layout.tsx", "layout.ts", "layout.jsx", "page.tsx", "page.ts", "page.jsx")
+        or n.startswith(("main.", "index.", "app.", "server.", "__main__"))
+        or "app/layout" in r
+        or "app/page" in r
+    ):
         return 0
     # CAPA 1 — fuente de verdad / datos / estado / schema
-    if ("data" in n or "store" in r or "schema" in r or "/db/" in r or r.startswith("db/")
-            or "models" in r or "state" in r or "context" in r):
+    if (
+        "data" in n
+        or "store" in r
+        or "schema" in r
+        or "/db/" in r
+        or r.startswith("db/")
+        or "models" in r
+        or "state" in r
+        or "context" in r
+    ):
         return 1
     # CAPA 2 — componentes de ALTO nivel (secciones, páginas, rutas, features)
-    if ("sections" in r or "/pages/" in r or "/routes/" in r or "features" in r
-            or "screens" in r or "views" in r):
+    if (
+        "sections" in r
+        or "/pages/" in r
+        or "/routes/" in r
+        or "features" in r
+        or "screens" in r
+        or "views" in r
+    ):
         return 2
     # CAPA 3 — primitivos / bajo nivel (ui, utils, helpers, lib genérica)
-    if ("/ui/" in r or "primitives" in r or "utils" in r or "helpers" in r
-            or "/lib/" in r or "/shared/" in r or "hooks" in r):
+    if (
+        "/ui/" in r
+        or "primitives" in r
+        or "utils" in r
+        or "helpers" in r
+        or "/lib/" in r
+        or "/shared/" in r
+        or "hooks" in r
+    ):
         return 3
     # CAPA 4 — el resto del código
     return 4
@@ -212,8 +301,9 @@ async def orden_por_recencia(owner: str, repo: str, pat: str) -> dict[str, int]:
     ranking: dict[str, int] = {}
     try:
         async with httpx.AsyncClient(timeout=20, follow_redirects=True) as cli:
-            r = await cli.get(f"{base}/commits", headers=headers,
-                              params={"per_page": COMMITS_PARA_RECENCIA})
+            r = await cli.get(
+                f"{base}/commits", headers=headers, params={"per_page": COMMITS_PARA_RECENCIA}
+            )
             if r.status_code >= 400:
                 return {}
             commits = r.json()
@@ -236,7 +326,8 @@ async def orden_por_recencia(owner: str, repo: str, pat: str) -> dict[str, int]:
 
 
 def repartir_por_categoria(
-    archivos: list[str], recencia: dict[str, int] | None = None,
+    archivos: list[str],
+    recencia: dict[str, int] | None = None,
     profundo: bool = False,
 ) -> tuple[list[str], dict]:
     """Reparte por categoría en el ORDEN DE LECTURA de el dueño (2026-06-17):
@@ -281,8 +372,20 @@ def repartir_por_categoria(
     return seleccion, cobertura
 
 
-async def _procesar_archivo(provider, mcp, pool, session_id, owner, repo, pregunta,
-                            ruta, system, oauth, max_tokens, progreso):
+async def _procesar_archivo(
+    provider,
+    mcp,
+    pool,
+    session_id,
+    owner,
+    repo,
+    pregunta,
+    ruta,
+    system,
+    oauth,
+    max_tokens,
+    progreso,
+):
     """Lee + analiza + acomoda UN archivo. Devuelve la línea de hallazgo."""
     if progreso:
         await progreso(ruta, "curso", "")
@@ -306,6 +409,7 @@ async def _procesar_archivo(provider, mcp, pool, session_id, owner, repo, pregun
     )
     if oauth:
         from for3s_core.conversation import FOR3S_ROLE
+
         messages = [{"role": "user", "content": f"[{FOR3S_ROLE}]\n\n{prompt}"}]
         sys_local = ""
     else:
@@ -313,8 +417,11 @@ async def _procesar_archivo(provider, mcp, pool, session_id, owner, repo, pregun
         sys_local = system
     try:
         data, _h = await asyncio.to_thread(
-            provider.complete_with_tools, messages,
-            system=sys_local, tools=None, max_tokens=max_tokens,
+            provider.complete_with_tools,
+            messages,
+            system=sys_local,
+            tools=None,
+            max_tokens=max_tokens,
         )
         analisis = "".join(
             b.get("text", "") for b in data.get("content", []) if b.get("type") == "text"
@@ -395,10 +502,22 @@ async def analizar_repo_por_subbloques(
             corte_por_tiempo = True
             idx_corte = i
             break
-        grupo = seleccion[i:i + LOTE]
+        grupo = seleccion[i : i + LOTE]
         tareas = [
-            _procesar_archivo(provider, mcp, pool, session_id, owner, repo,
-                              pregunta, ruta, system, oauth, max_tokens, progreso)
+            _procesar_archivo(
+                provider,
+                mcp,
+                pool,
+                session_id,
+                owner,
+                repo,
+                pregunta,
+                ruta,
+                system,
+                oauth,
+                max_tokens,
+                progreso,
+            )
             for ruta in grupo
         ]
         try:
@@ -410,10 +529,15 @@ async def analizar_repo_por_subbloques(
                 if contenido_r:
                     try:
                         await memory.save_gh_tool_calls(
-                            pool, session_id=session_id,
-                            tool_calls=[{"name": "get_file_contents",
-                                         "args": {"owner": owner, "repo": repo, "path": ruta_r},
-                                         "result": contenido_r}],
+                            pool,
+                            session_id=session_id,
+                            tool_calls=[
+                                {
+                                    "name": "get_file_contents",
+                                    "args": {"owner": owner, "repo": repo, "path": ruta_r},
+                                    "result": contenido_r,
+                                }
+                            ],
                         )
                     except Exception:
                         pass
@@ -441,9 +565,14 @@ async def analizar_repo_por_subbloques(
 
     # cobertura honesta = LEÍDO REAL / TOTAL del repo (no lo planeado)
     cob_lineas = []
-    for cat, etiqueta in (("readme", "README"), ("config", "Config/CI"),
-                          ("doc", "Documentación"), ("src", "Código fuente (src)"),
-                          ("test", "Tests"), ("otro", "Otros")):
+    for cat, etiqueta in (
+        ("readme", "README"),
+        ("config", "Config/CI"),
+        ("doc", "Documentación"),
+        ("src", "Código fuente (src)"),
+        ("test", "Tests"),
+        ("otro", "Otros"),
+    ):
         c = cobertura.get(cat, {"total": 0, "leidos": 0})
         if c["total"] > 0:
             real = leidos_cat.get(cat, 0)
@@ -505,6 +634,7 @@ async def analizar_repo_por_subbloques(
         )
     if oauth:
         from for3s_core.conversation import FOR3S_ROLE
+
         msgs = [{"role": "user", "content": f"[{FOR3S_ROLE}]\n\n{sintesis_prompt}"}]
         sys_f = ""
     else:

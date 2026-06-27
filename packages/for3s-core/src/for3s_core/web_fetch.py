@@ -28,32 +28,45 @@ import httpx
 
 # Límites de seguridad
 TIMEOUT = 20.0
-MAX_BYTES = 600_000          # no descargar páginas gigantes
-MAX_TEXTO = 12_000           # lo que se le pasa a Claude (acotado)
+MAX_BYTES = 600_000  # no descargar páginas gigantes
+MAX_TEXTO = 12_000  # lo que se le pasa a Claude (acotado)
 _UA = "Mozilla/5.0 (compatible; For3sOS/1.0)"
 
 # Umbral: si el texto útil extraído por httpx es más corto que esto, asumimos
 # que es una SPA sin renderizar (cáscara JS) y vale la pena el render headless.
 UMBRAL_SPA = 350
 RENDER_IMAGE = "for3s-render:latest"
-RENDER_TIMEOUT = 45.0        # docker run + render de Chromium
+RENDER_TIMEOUT = 45.0  # docker run + render de Chromium
 
 # Señales de que la página exige iniciar sesión (no peleamos contra esto).
 _SENALES_LOGIN = (
-    "sign in", "log in", "login", "iniciar sesión", "inicia sesión",
-    "create an account", "you must be logged in", "please enable javascript",
+    "sign in",
+    "log in",
+    "login",
+    "iniciar sesión",
+    "inicia sesión",
+    "create an account",
+    "you must be logged in",
+    "please enable javascript",
 )
 
 # Señales de un MURO ANTI-BOT (la página detectó acceso automatizado y nos da
 # una pantalla de "no eres humano" en vez del contenido). Igual que con login,
 # NO peleamos contra esto (Amazon, Cloudflare, etc.): avisamos con honestidad.
 _SENALES_ANTIBOT = (
-    "continue shopping",            # Amazon: "Click the button below to continue shopping"
+    "continue shopping",  # Amazon: "Click the button below to continue shopping"
     "to discuss automated access",  # Amazon bot wall
-    "are you a human", "are you a robot", "robot check", "captcha",
-    "verifying you are human", "checking your browser",  # Cloudflare
-    "access denied", "request blocked", "unusual traffic",
-    "enable cookies", "verify you are human",
+    "are you a human",
+    "are you a robot",
+    "robot check",
+    "captcha",
+    "verifying you are human",
+    "checking your browser",  # Cloudflare
+    "access denied",
+    "request blocked",
+    "unusual traffic",
+    "enable cookies",
+    "verify you are human",
 )
 
 
@@ -102,7 +115,7 @@ def _largo_contenido(texto: str) -> int:
     si la página venía vacía (SPA). Si no hay marcador, mide todo."""
     marca = "\nCONTENIDO:\n"
     i = texto.find(marca)
-    cuerpo = texto[i + len(marca):] if i >= 0 else texto
+    cuerpo = texto[i + len(marca) :] if i >= 0 else texto
     return len(cuerpo.strip())
 
 
@@ -111,8 +124,15 @@ async def _render_headless(url: str) -> tuple[bool, str]:
     (ok, texto_o_error). Usa --network host para alcanzar internet del server."""
     try:
         proc = await asyncio.create_subprocess_exec(
-            "docker", "run", "--rm", "--network", "host", RENDER_IMAGE, url,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            "docker",
+            "run",
+            "--rm",
+            "--network",
+            "host",
+            RENDER_IMAGE,
+            url,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
         out, err = await asyncio.wait_for(proc.communicate(), timeout=RENDER_TIMEOUT)
     except TimeoutError:

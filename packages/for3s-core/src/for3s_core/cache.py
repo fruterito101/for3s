@@ -45,7 +45,7 @@ CACHEABLE_TOOLS_TTL = {
 NEVER_CACHE = {"get_pull_request_status", "get_pull_request_files"}
 
 _PREFIJO = "for3s:gh"  # namespace de las keys en Valkey
-_TIMEOUT = 1.5         # seg: si Valkey tarda más, degradamos (no bloqueamos al bot)
+_TIMEOUT = 1.5  # seg: si Valkey tarda más, degradamos (no bloqueamos al bot)
 
 
 class GitHubCache:
@@ -55,8 +55,11 @@ class GitHubCache:
         # socket_timeout corto: si Valkey no responde rápido, preferimos leer de
         # GitHub a colgar el turno. El cliente se crea perezoso (no conecta aún).
         self._r = redis.Redis(
-            host=host, port=port, decode_responses=True,
-            socket_timeout=_TIMEOUT, socket_connect_timeout=_TIMEOUT,
+            host=host,
+            port=port,
+            decode_responses=True,
+            socket_timeout=_TIMEOUT,
+            socket_connect_timeout=_TIMEOUT,
         )
 
     @staticmethod

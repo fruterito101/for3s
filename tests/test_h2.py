@@ -17,8 +17,13 @@ class FakeProvider(LLMProvider):
         self.last_prompt = ""
 
     def complete(
-        self, user_message: str, *, system: str = "", max_tokens: int = 1024,
-        adjuntos: list[dict] | None = None, **kwargs,
+        self,
+        user_message: str,
+        *,
+        system: str = "",
+        max_tokens: int = 1024,
+        adjuntos: list[dict] | None = None,
+        **kwargs,
     ) -> LLMResponse:
         # adjuntos/**kwargs: el provider real ganó params opcionales (multimodal,
         # 2026-06-18); el fake los acepta y los ignora para no romper el test.

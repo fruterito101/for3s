@@ -162,19 +162,30 @@ class ClaudeProvider(LLMProvider):
                     "[429-GUARD] se pasó un system custom en modo OAuth (%d chars) → "
                     "lo ignoro para no disparar el falso-429. El flujo que llama debe "
                     "poner sus instrucciones en el USER message, no en system. "
-                    "system[:80]=%r", len(system), system[:80],
+                    "system[:80]=%r",
+                    len(system),
+                    system[:80],
                 )
             return CLAUDE_CODE_IDENTITY
         return system
 
     def _request_once(self, payload: dict, betas_extra: tuple[str, ...] = ()) -> httpx.Response:
         return httpx.post(
-            API_URL, headers=self._headers(betas_extra=betas_extra),
-            json=payload, timeout=self._timeout,
+            API_URL,
+            headers=self._headers(betas_extra=betas_extra),
+            json=payload,
+            timeout=self._timeout,
         )
 
-    def _post(self, payload: dict, *, est_in: int, est_out: int, max_retries: int = 5,
-              betas_extra: tuple[str, ...] = ()):
+    def _post(
+        self,
+        payload: dict,
+        *,
+        est_in: int,
+        est_out: int,
+        max_retries: int = 5,
+        betas_extra: tuple[str, ...] = (),
+    ):
         """CAPA 1 (acquire) + CAPA 3 (backoff retry-after) + CAPA 2 (report headers)."""
         for attempt in range(max_retries):
             # CAPA 1: pide turno al gestor (cede paso si no hay cuota)
@@ -195,14 +206,17 @@ class ClaudeProvider(LLMProvider):
                     logger.error(
                         "[429-SYSTEM] OAuth rechazó un system prompt custom (NO es "
                         "rate-limit real, sin retry-after). Revisar que el rol vaya en "
-                        "el user message y system='' en este flujo. cuerpo=%s", cuerpo,
+                        "el user message y system='' en este flujo. cuerpo=%s",
+                        cuerpo,
                     )
                     raise RateLimitExceeded(0)  # reintentar no ayuda → aviso amigable
                 # CAPA 3: 429 real → respeta el retry-after exacto
                 wait = parse_retry_after(resp.headers)
                 logger.warning(
                     "[429-RATE] rate-limit real (retry-after=%.0fs, intento %d/%d)",
-                    wait, attempt + 1, max_retries,
+                    wait,
+                    attempt + 1,
+                    max_retries,
                 )
                 if wait > MAX_WAIT_SECONDS:
                     raise RateLimitExceeded(wait)
@@ -218,7 +232,7 @@ class ClaudeProvider(LLMProvider):
                 # (estos errores NO traen retry-after). Antes esto reventaba en
                 # raise_for_status() y dejaba al bot MUDO (hueco 440-448, 2026-06-22).
                 if attempt < max_retries - 1:
-                    espera = min(2.0 * (2 ** attempt), MAX_WAIT_SECONDS)  # 2,4,8,16…
+                    espera = min(2.0 * (2**attempt), MAX_WAIT_SECONDS)  # 2,4,8,16…
                     self._sleep(espera)
                     continue
                 # Agotados los reintentos → mensaje amigable, no traceback.
@@ -232,7 +246,11 @@ class ClaudeProvider(LLMProvider):
         raise RateLimitExceeded(parse_retry_after({}))
 
     def complete(
-        self, user_message: str, *, system: str = "", max_tokens: int = 1024,
+        self,
+        user_message: str,
+        *,
+        system: str = "",
+        max_tokens: int = 1024,
         adjuntos: list[dict] | None = None,
     ) -> LLMResponse:
         # adjuntos: bloques multimodales (imagen/document/texto extraído) que
@@ -266,7 +284,10 @@ class ClaudeProvider(LLMProvider):
         peso_adj = sum(len(str(b)) for b in adjuntos) // 3 if adjuntos else 0
         est_in = max(100, len(user_message) // 3 + len(full_system) // 3 + peso_adj)
         data, resp_headers = self._post(
-            payload, est_in=est_in, est_out=max_tokens, betas_extra=betas_extra,
+            payload,
+            est_in=est_in,
+            est_out=max_tokens,
+            betas_extra=betas_extra,
         )
 
         text = "".join(

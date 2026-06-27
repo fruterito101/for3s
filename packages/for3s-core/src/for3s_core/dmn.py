@@ -52,10 +52,10 @@ class DMNTask:
     """Una task del DMN: trigger (¿vale correr?) + action (hace el trabajo)."""
 
     nombre: str
-    clase: str                                   # housekeeping | generativa
-    trigger: Callable[..., Awaitable[bool]]      # async (pool, ws) -> bool
+    clase: str  # housekeeping | generativa
+    trigger: Callable[..., Awaitable[bool]]  # async (pool, ws) -> bool
     action: Callable[..., Awaitable[DMNTaskResult]]  # async (pool, ws) -> DMNTaskResult
-    solo_noche: bool = False                      # True = no corre en idle de día (pesada)
+    solo_noche: bool = False  # True = no corre en idle de día (pesada)
 
 
 # Registro de tasks. H9-b (housekeeping) y H9-c (generativas) lo llenan vía registrar().
@@ -78,10 +78,12 @@ async def minutos_idle(pool, *, workspace: str = WORKSPACE_DEFAULT) -> float | N
     try:
         async with pool.acquire() as con:
             ultimo = await con.fetchval(
-                "SELECT max(created_at) FROM episodes_events WHERE deleted_at IS NULL")
+                "SELECT max(created_at) FROM episodes_events WHERE deleted_at IS NULL"
+            )
         if ultimo is None:
             return None
         from datetime import datetime
+
         ahora = datetime.now(UTC)
         dt = ultimo if ultimo.tzinfo else ultimo.replace(tzinfo=UTC)
         return (ahora - dt).total_seconds() / 60.0
@@ -90,8 +92,7 @@ async def minutos_idle(pool, *, workspace: str = WORKSPACE_DEFAULT) -> float | N
         return None
 
 
-async def esta_idle(pool, *, minimo: int = IDLE_MIN,
-                    workspace: str = WORKSPACE_DEFAULT) -> bool:
+async def esta_idle(pool, *, minimo: int = IDLE_MIN, workspace: str = WORKSPACE_DEFAULT) -> bool:
     """True si el sistema lleva ≥ `minimo` minutos sin actividad."""
     m = await minutos_idle(pool, workspace=workspace)
     return m is not None and m >= minimo
@@ -107,18 +108,27 @@ async def _clases_activas(pool, *, workspace: str = WORKSPACE_DEFAULT) -> tuple[
         async with pool.acquire() as con:
             r = await con.fetchrow(
                 "SELECT housekeeping_on, generativas_on FROM dmn_estado WHERE workspace=$1",
-                workspace)
+                workspace,
+            )
         if r is None:
             return (True, False)
         return (bool(r["housekeeping_on"]), bool(r["generativas_on"]))
     except Exception:  # noqa: BLE001
-        logger.warning("no pude leer estado DMN — asumo housekeeping ON / generativas OFF",
-                       exc_info=True)
+        logger.warning(
+            "no pude leer estado DMN — asumo housekeeping ON / generativas OFF", exc_info=True
+        )
         return (True, False)
 
 
-async def set_clase(pool, clase: str, on: bool, *, por: int | None = None,
-                    motivo: str = "", workspace: str = WORKSPACE_DEFAULT) -> None:
+async def set_clase(
+    pool,
+    clase: str,
+    on: bool,
+    *,
+    por: int | None = None,
+    motivo: str = "",
+    workspace: str = WORKSPACE_DEFAULT,
+) -> None:
     """Enciende/apaga una clase de tasks (housekeeping|generativa). Solo el dueño."""
     col = "housekeeping_on" if clase == CLASE_HOUSEKEEPING else "generativas_on"
     async with pool.acquire() as con:
@@ -127,24 +137,43 @@ async def set_clase(pool, clase: str, on: bool, *, por: int | None = None,
             "VALUES ($1,$2,$3,now(),$4) "
             f"ON CONFLICT (workspace) DO UPDATE SET {col}=$2, cambiado_por=$3, "
             "cambiado_at=now(), motivo=$4",
-            workspace, on, por, (motivo or "")[:200])
+            workspace,
+            on,
+            por,
+            (motivo or "")[:200],
+        )
     logger.info("[dmn] %s_on=%s por=%s", col, on, por)
 
 
 # ───────────────────────── registro de corridas ─────────────────────────
-async def _registrar_corrida(pool, task: DMNTask, *, trigger_ok: bool, corrio: bool,
-                             res: DMNTaskResult | None, ms: int,
-                             workspace: str = WORKSPACE_DEFAULT) -> None:
+async def _registrar_corrida(
+    pool,
+    task: DMNTask,
+    *,
+    trigger_ok: bool,
+    corrio: bool,
+    res: DMNTaskResult | None,
+    ms: int,
+    workspace: str = WORKSPACE_DEFAULT,
+) -> None:
     """Deja constancia de una corrida (append-only, base del ROI). Defensivo."""
     import json
+
     try:
         async with pool.acquire() as con:
             await con.execute(
                 "INSERT INTO dmn_corridas (workspace, task, clase, trigger_ok, corrio, "
                 " outcome, costo_usd, ms, motivo) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
-                workspace, task.nombre, task.clase, trigger_ok, corrio,
+                workspace,
+                task.nombre,
+                task.clase,
+                trigger_ok,
+                corrio,
                 json.dumps(res.outcome if res else {}),
-                (res.costo_usd if res else 0.0), ms, (res.motivo if res else "")[:500])
+                (res.costo_usd if res else 0.0),
+                ms,
+                (res.motivo if res else "")[:500],
+            )
     except Exception:  # noqa: BLE001 — el registro nunca rompe la corrida
         logger.warning("no pude registrar corrida DMN de %s", task.nombre, exc_info=True)
 
@@ -162,12 +191,15 @@ class DMNRunReport:
 
     def __str__(self) -> str:
         idle = f"{self.idle_min:.0f}m" if self.idle_min is not None else "?"
-        return (f"DMN ciclo: idle={idle} · evaluadas={self.evaluadas} "
-                f"corridas={self.corridas} saltadas={self.saltadas}")
+        return (
+            f"DMN ciclo: idle={idle} · evaluadas={self.evaluadas} "
+            f"corridas={self.corridas} saltadas={self.saltadas}"
+        )
 
 
-async def correr_ciclo(pool, *, solo_noche: bool = False, forzar: bool = False,
-                       workspace: str = WORKSPACE_DEFAULT) -> DMNRunReport:
+async def correr_ciclo(
+    pool, *, solo_noche: bool = False, forzar: bool = False, workspace: str = WORKSPACE_DEFAULT
+) -> DMNRunReport:
     """Corre UN ciclo del DMN: para cada task elegible (clase ON + trigger OK),
     ejecuta su action y registra el resultado.
 
@@ -210,8 +242,9 @@ async def correr_ciclo(pool, *, solo_noche: bool = False, forzar: bool = False,
             res = DMNTaskResult(motivo=f"error: {type(e).__name__}")
             logger.exception("[dmn] task %s falló", task.nombre)
         ms = int((time.monotonic() - t0) * 1000)
-        await _registrar_corrida(pool, task, trigger_ok=trigger_ok, corrio=corrio,
-                                 res=res, ms=ms, workspace=workspace)
+        await _registrar_corrida(
+            pool, task, trigger_ok=trigger_ok, corrio=corrio, res=res, ms=ms, workspace=workspace
+        )
         if corrio:
             rep.corridas += 1
             rep.detalle.append(f"{task.nombre}: {res.outcome if res else {}}")
@@ -239,9 +272,13 @@ async def status(pool, *, workspace: str = WORKSPACE_DEFAULT) -> DMNStatus:
     corridas_hoy = 0
     try:
         async with pool.acquire() as con:
-            corridas_hoy = await con.fetchval(
-                "SELECT count(*) FROM dmn_corridas WHERE corrio=true "
-                "AND creado_at >= date_trunc('day', now())") or 0
+            corridas_hoy = (
+                await con.fetchval(
+                    "SELECT count(*) FROM dmn_corridas WHERE corrio=true "
+                    "AND creado_at >= date_trunc('day', now())"
+                )
+                or 0
+            )
     except Exception:  # noqa: BLE001
         pass
     return DMNStatus(idle, hk_on, gen_on, len(_TASKS), corridas_hoy)
@@ -260,24 +297,30 @@ class DMNPropuesta:
     creada_at: object
 
 
-async def propuestas_pendientes(pool, *, limite: int = 10,
-                                workspace: str = WORKSPACE_DEFAULT) -> list[DMNPropuesta]:
+async def propuestas_pendientes(
+    pool, *, limite: int = 10, workspace: str = WORKSPACE_DEFAULT
+) -> list[DMNPropuesta]:
     """Propuestas generativas que esperan decisión del dueño. Defensivo."""
     try:
         async with pool.acquire() as con:
             rows = await con.fetch(
                 "SELECT id, task, tipo, titulo, contenido, creada_at FROM dmn_propuestas "
                 "WHERE estado='pendiente' AND workspace=$1 ORDER BY creada_at DESC LIMIT $2",
-                workspace, limite)
-        return [DMNPropuesta(r["id"], r["task"], r["tipo"], r["titulo"],
-                             r["contenido"], r["creada_at"]) for r in rows]
+                workspace,
+                limite,
+            )
+        return [
+            DMNPropuesta(r["id"], r["task"], r["tipo"], r["titulo"], r["contenido"], r["creada_at"])
+            for r in rows
+        ]
     except Exception:  # noqa: BLE001
         logger.warning("no pude leer propuestas DMN", exc_info=True)
         return []
 
 
-async def resolver_propuesta(pool, prop_id: int, *, aprobar: bool,
-                             por: int | None = None) -> str | None:
+async def resolver_propuesta(
+    pool, prop_id: int, *, aprobar: bool, por: int | None = None
+) -> str | None:
     """El dueño aprueba/descarta una propuesta. Devuelve el título, o None si no aplica.
     v1: aprobar = marcarla aprobada (queda como registro/idea validada — aplicarla es
     trabajo manual o futuro AC3). descartar = archivarla. Nunca auto-ejecuta."""
@@ -287,7 +330,10 @@ async def resolver_propuesta(pool, prop_id: int, *, aprobar: bool,
             return await con.fetchval(
                 "UPDATE dmn_propuestas SET estado=$2, resuelta_por=$3, resuelta_at=now() "
                 "WHERE id=$1 AND estado='pendiente' RETURNING titulo",
-                prop_id, estado, por)
+                prop_id,
+                estado,
+                por,
+            )
     except Exception:  # noqa: BLE001
         return None
 
@@ -301,15 +347,16 @@ async def resolver_propuesta(pool, prop_id: int, *, aprobar: bool,
 class TaskROI:
     task: str
     clase: str
-    corridas: int          # veces que la action se ejecutó (corrio=true)
-    evaluadas: int         # veces que el trigger se evaluó
-    costo_total: float     # USD acumulado en la ventana
-    ultima: object         # fecha de la última corrida
-    recomendacion: str     # keep | revisar (gastó y nunca corrió de verdad) | sin-datos
+    corridas: int  # veces que la action se ejecutó (corrio=true)
+    evaluadas: int  # veces que el trigger se evaluó
+    costo_total: float  # USD acumulado en la ventana
+    ultima: object  # fecha de la última corrida
+    recomendacion: str  # keep | revisar (gastó y nunca corrió de verdad) | sin-datos
 
 
-async def roi_por_task(pool, *, dias: int = 30,
-                       workspace: str = WORKSPACE_DEFAULT) -> list[TaskROI]:
+async def roi_por_task(
+    pool, *, dias: int = 30, workspace: str = WORKSPACE_DEFAULT
+) -> list[TaskROI]:
     """ROI de cada task en los últimos `dias`. Sobre dmn_corridas (real). Defensivo.
 
     Recomendación v1 (conservadora, solo SUGIERE — nunca apaga sola):
@@ -328,18 +375,29 @@ async def roi_por_task(pool, *, dias: int = 30,
                 "FROM dmn_corridas "
                 "WHERE workspace=$1 AND creado_at >= now() - make_interval(days => $2) "
                 "GROUP BY task ORDER BY costo DESC, corridas DESC",
-                workspace, dias)
+                workspace,
+                dias,
+            )
         for r in rows:
             corridas = r["corridas"] or 0
             costo = float(r["costo"] or 0)
             if r["evaluadas"] == 0:
                 rec = "sin-datos"
             elif costo > 0 and corridas == 0:
-                rec = "revisar"   # gastó (se intentó) pero nunca produjo → ¿vale?
+                rec = "revisar"  # gastó (se intentó) pero nunca produjo → ¿vale?
             else:
                 rec = "keep"
-            out.append(TaskROI(r["task"], r["clase"] or "", corridas, r["evaluadas"] or 0,
-                               costo, r["ultima"], rec))
+            out.append(
+                TaskROI(
+                    r["task"],
+                    r["clase"] or "",
+                    corridas,
+                    r["evaluadas"] or 0,
+                    costo,
+                    r["ultima"],
+                    rec,
+                )
+            )
     except Exception:  # noqa: BLE001
         logger.warning("no pude calcular ROI del DMN", exc_info=True)
     return out

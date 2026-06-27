@@ -180,7 +180,7 @@ async def _enviar_html(msg, texto: str) -> None:
     for trozo_md in split_message(texto, limit=3000):
         chunk_html = md_a_html_telegram(trozo_md)
         plano = _re.sub(r"<[^>]+>", "", chunk_html)
-        plano = (plano.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&"))
+        plano = plano.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
         # Reintentar por chunk con backoff: distingue fallo de RED (reintenta) de
         # fallo de HTML (texto plano). Red de casa parpadea → sin esto un bache
         # perdía el reporte (bug 2026-06-17).
@@ -252,6 +252,7 @@ def _humanizar_fecha(dt) -> str:
         return "sin actividad"
     try:
         from datetime import UTC, datetime
+
         ahora = datetime.now(UTC)
         d = dt if getattr(dt, "tzinfo", None) else dt.replace(tzinfo=UTC)
         seg = (ahora - d).total_seconds()
@@ -340,7 +341,6 @@ class OwnerStore:
         return owner is not None and user_id is not None and user_id == owner
 
 
-
 def crear_progreso_categorias(context, chat_id, titulo_fn):
     """Crea un callback de progreso POR CATEGORÍAS (1 mensaje editable, bolas
     🟢🟡⚪, sin lista de archivos). Lo usan TANTO el mapeo inicial como la
@@ -348,11 +348,24 @@ def crear_progreso_categorias(context, chat_id, titulo_fn):
     no como spam de mensajes con lista de archivos). titulo_fn(hechos,total,prof)
     arma el encabezado (ej. 'Mapeando...' o 'Continuando...')."""
     _CAT_LABEL = {
-        "readme": "README", "config": "Config/CI", "doc": "Documentación",
-        "src": "Código fuente", "test": "Tests", "otro": "Otros",
+        "readme": "README",
+        "config": "Config/CI",
+        "doc": "Documentación",
+        "src": "Código fuente",
+        "test": "Tests",
+        "otro": "Otros",
     }
-    _prog = {"total": 0, "hechos": 0, "tot_cat": {}, "ok_cat": {},
-             "curso": set(), "errores": [], "m": None, "ultimo": "", "profundo": True}
+    _prog = {
+        "total": 0,
+        "hechos": 0,
+        "tot_cat": {},
+        "ok_cat": {},
+        "curso": set(),
+        "errores": [],
+        "m": None,
+        "ultimo": "",
+        "profundo": True,
+    }
 
     def _render() -> str:
         prof = _prog["profundo"]
@@ -369,8 +382,9 @@ def crear_progreso_categorias(context, chat_id, titulo_fn):
                 bola = "🟡"
             else:
                 bola = "⚪"
-            lineas.append(f"{bola} {_CAT_LABEL[cat]}  {hechos}/{tot}" if prof
-                          else f"{bola} {_CAT_LABEL[cat]}")
+            lineas.append(
+                f"{bola} {_CAT_LABEL[cat]}  {hechos}/{tot}" if prof else f"{bola} {_CAT_LABEL[cat]}"
+            )
         cuerpo = "\n".join(lineas)
         if _prog["errores"]:
             errs = "\n".join(f"🔴 {r} — {m}" for r, m in _prog["errores"][-5:])
@@ -387,13 +401,15 @@ def crear_progreso_categorias(context, chat_id, titulo_fn):
                 _prog["m"] = await context.bot.send_message(chat_id, txt)
             else:
                 await context.bot.edit_message_text(
-                    txt, chat_id=chat_id, message_id=_prog["m"].message_id)
+                    txt, chat_id=chat_id, message_id=_prog["m"].message_id
+                )
         except Exception:
             pass
 
     async def _progreso(ruta: str, estado: str, detalle: str) -> None:
         if estado == "plan":
             import json as _json
+
             d = _json.loads(detalle)
             _prog["total"] = d.get("total", 0)
             _prog["tot_cat"] = d.get("por_cat", {})
@@ -477,7 +493,9 @@ class TelegramChannel:
         self._equipo = equipo_mod.EquipoStore(self._pool)  # H8 S10e (aditivo)
         self._temas = temas_mod.TemaStore(self._pool)  # AI2 temas (aditivo)
         provider = ClaudeProvider(
-            token=settings.anthropic_token, oauth=settings.is_oauth, model=settings.model,
+            token=settings.anthropic_token,
+            oauth=settings.is_oauth,
+            model=settings.model,
             # 180s (no el default 60s): un PDF/imagen grande o un repo grande hace
             # que Claude tarde más de 60s → httpcore.ReadTimeout ("error procesando
             # adjunto", 2026-06-18). Alineado con ANALYSIS_TIMEOUT.
@@ -489,6 +507,7 @@ class TelegramChannel:
         # Así su selección sobrevive reinicios. Si no eligió, queda el de settings.
         try:
             from for3s_core import modelos
+
             elegido = await modelos.get_seleccionado(self._pool, settings.owner_session)
             if elegido and elegido != settings.model:
                 provider.set_model(elegido)
@@ -519,11 +538,14 @@ class TelegramChannel:
         async def _precargar_embeddings() -> None:
             try:
                 from for3s_core import embeddings
+
                 await asyncio.to_thread(embeddings._get_modelo)
                 logger.info("modelo de embeddings precargado (memoria semántica lista)")
             except Exception:
-                logger.warning("no pude precargar embeddings (memoria semántica degradará)",
-                               exc_info=True)
+                logger.warning(
+                    "no pude precargar embeddings (memoria semántica degradará)", exc_info=True
+                )
+
         asyncio.create_task(_precargar_embeddings())
 
         # MENÚ de comandos por defecto (lo que ve quien aún no es admin). El menú
@@ -537,8 +559,7 @@ class TelegramChannel:
             # escribir (on_message). Esto arregla el "solo veo 3 comandos".
             owner = self._owners.get_owner()
             if owner is not None:
-                await app.bot.set_my_commands(
-                    _MENU_ADMIN, scope=BotCommandScopeChat(owner))
+                await app.bot.set_my_commands(_MENU_ADMIN, scope=BotCommandScopeChat(owner))
                 logger.info("menú ADMIN publicado para el dueño %s", owner)
         except Exception:  # noqa: BLE001 — menú cosmético, no bloquea el arranque
             logger.warning("no pude publicar el menú (no crítico)", exc_info=True)
@@ -602,18 +623,21 @@ class TelegramChannel:
             if motivo == "puerta_cerrada":
                 await update.message.reply_text(
                     "🔴 La puerta de este equipo está cerrada. Pídele al encargado "
-                    "que la abra (con /invitar) para entrar.")
+                    "que la abra (con /invitar) para entrar."
+                )
             else:
                 await update.message.reply_text("⛔ Este bot es privado.")
             return
         await self._publicar_menu(context.bot, update.message.chat_id, user)
         if self._es_admin(user.id):
             await update.message.reply_text(
-                "🦊 Hola de nuevo. Te escucho. Escribe / para ver tus comandos.")
+                "🦊 Hola de nuevo. Te escucho. Escribe / para ver tus comandos."
+            )
         else:
             await update.message.reply_text(
                 "🦊 ¡Hola! Soy For3s, el segundo cerebro del equipo. Escríbeme lo que "
-                "necesites. Escribe / para ver los comandos disponibles.")
+                "necesites. Escribe / para ver los comandos disponibles."
+            )
 
     async def _update_cupo_pin(self, context, chat_id, usage_5h, usage_7d) -> None:
         """Mantiene SOLO el mensaje fijado de arriba con el cupo, sin ruido.
@@ -718,8 +742,7 @@ class TelegramChannel:
             return False, "privado"
         try:
             nombre = getattr(user, "full_name", None)
-            return await self._equipo.autorizar(
-                self._owners.get_owner(), uid, nombre=nombre)
+            return await self._equipo.autorizar(self._owners.get_owner(), uid, nombre=nombre)
         except Exception:  # noqa: BLE001 — fail-closed: ante error, denegar
             logger.warning("error en _autorizar (deniego)", exc_info=True)
             return False, "error"
@@ -731,8 +754,7 @@ class TelegramChannel:
         no rompe nada; el menú es cosmético). Se llama al primer contacto y en cada
         mensaje autorizado (Telegram cachea, así que re-publicar es barato)."""
         try:
-            comandos = _MENU_ADMIN if self._es_admin(getattr(user, "id", None)) \
-                else _MENU_BASICO
+            comandos = _MENU_ADMIN if self._es_admin(getattr(user, "id", None)) else _MENU_BASICO
             await bot.set_my_commands(comandos, scope=BotCommandScopeChat(chat_id))
         except Exception:  # noqa: BLE001 — el menú es cosmético, nunca debe romper
             logger.warning("no pude publicar el menú de comandos (no crítico)")
@@ -747,7 +769,8 @@ class TelegramChannel:
             await msg.reply_text(
                 f"👋 ¡Bienvenida/o al equipo, {nombre}! Soy For3s, el segundo cerebro "
                 "compartido. Escríbeme lo que necesites; tu conversación es privada "
-                "y separada de la de los demás.")
+                "y separada de la de los demás."
+            )
         except Exception:  # noqa: BLE001
             pass
         # C-i — aviso PROACTIVO al encargado (a su chat, por su user_id)
@@ -763,7 +786,8 @@ class TelegramChannel:
                 await context.bot.send_message(
                     chat_id=owner_id,
                     text=f"👤 *{nombre}* se unió al equipo (por la puerta abierta){extra}.",
-                    parse_mode=ParseMode.MARKDOWN)
+                    parse_mode=ParseMode.MARKDOWN,
+                )
             except Exception:  # noqa: BLE001 — el encargado pudo bloquear al bot, etc.
                 logger.warning("no pude avisar al encargado del nuevo miembro")
 
@@ -778,12 +802,23 @@ class TelegramChannel:
         t = normalizar(texto)
         # señales explícitas de querer un análisis amplio/multi-perspectiva
         gatillos = (
-            "analiza a fondo", "analisis a fondo", "analiza a profundidad",
-            "revision completa", "revisa a fondo", "auditoria completa",
-            "auditoria de", "analisis completo", "evalua a fondo",
-            "revision exhaustiva", "analisis exhaustivo", "todos los angulos",
-            "desde todos los angulos", "vision completa", "analiza con el equipo",
-            "usa el equipo", "lanza el equipo",
+            "analiza a fondo",
+            "analisis a fondo",
+            "analiza a profundidad",
+            "revision completa",
+            "revisa a fondo",
+            "auditoria completa",
+            "auditoria de",
+            "analisis completo",
+            "evalua a fondo",
+            "revision exhaustiva",
+            "analisis exhaustivo",
+            "todos los angulos",
+            "desde todos los angulos",
+            "vision completa",
+            "analiza con el equipo",
+            "usa el equipo",
+            "lanza el equipo",
         )
         return any(g in t for g in gatillos)
 
@@ -797,16 +832,35 @@ class TelegramChannel:
         if len(t) < 15:
             return False  # mensajes muy cortos = charla, no amerita
         señales = (
-            "compara", "comparar", "comparacion", "pros y contras", "ventajas y desventajas",
-            "evalua", "evaluar", "evaluacion", "que riesgos", "riesgos de", "que tan",
-            "cual es mejor", "cual conviene", "decidir entre", "que opcion",
-            "ayudame a decidir", "analiza", "analisis de", "revisa", "audita",
-            "que opinas de", "plan para", "estrategia para",
+            "compara",
+            "comparar",
+            "comparacion",
+            "pros y contras",
+            "ventajas y desventajas",
+            "evalua",
+            "evaluar",
+            "evaluacion",
+            "que riesgos",
+            "riesgos de",
+            "que tan",
+            "cual es mejor",
+            "cual conviene",
+            "decidir entre",
+            "que opcion",
+            "ayudame a decidir",
+            "analiza",
+            "analisis de",
+            "revisa",
+            "audita",
+            "que opinas de",
+            "plan para",
+            "estrategia para",
         )
         return any(s in t for s in señales)
 
-    async def _correr_equipo_y_responder(self, msg, texto: str, scope_user_id=None,
-                                         *, sesion=None, autor_id=None) -> None:
+    async def _correr_equipo_y_responder(
+        self, msg, texto: str, scope_user_id=None, *, sesion=None, autor_id=None
+    ) -> None:
         """G (robustez): garantiza que solo UNA corrida de equipo corre a la vez en
         todo el bot (semáforo global). Si hay una en curso, avisa que está en cola y
         espera turno. Luego delega en _correr_equipo_inner. Así varias personas NO
@@ -814,18 +868,23 @@ class TelegramChannel:
         MAX_EQUIPOS_COLA = 3
         if self._equipos_en_cola >= MAX_EQUIPOS_COLA:
             await _responder_seguro(
-                msg, "📋 Hay varios análisis de equipo en espera. Dame un momento a "
-                "que bajen y reintenta — así no saturo el límite de Claude.")
+                msg,
+                "📋 Hay varios análisis de equipo en espera. Dame un momento a "
+                "que bajen y reintenta — así no saturo el límite de Claude.",
+            )
             return
         if self._equipo_lock.locked():
             await _responder_seguro(
-                msg, "📋 Hay un análisis de equipo en curso — el tuyo entra en cola, "
-                "lo proceso en cuanto termine (no tienes que repetir).")
+                msg,
+                "📋 Hay un análisis de equipo en curso — el tuyo entra en cola, "
+                "lo proceso en cuanto termine (no tienes que repetir).",
+            )
         self._equipos_en_cola += 1
         try:
             async with self._equipo_lock:
                 await self._correr_equipo_inner(
-                    msg, texto, scope_user_id=scope_user_id, sesion=sesion, autor_id=autor_id)
+                    msg, texto, scope_user_id=scope_user_id, sesion=sesion, autor_id=autor_id
+                )
         finally:
             self._equipos_en_cola -= 1
         # H12 P2: una corrida de equipo = tarea compleja → buen candidato a destilar
@@ -846,22 +905,30 @@ class TelegramChannel:
             if provider is None or sesion is None:
                 return
             from for3s_core.aprende import proponer_skill_auto
-            res = await proponer_skill_auto(
-                self._pool, provider, sesion, creada_por=autor_id)
+
+            res = await proponer_skill_auto(self._pool, provider, sesion, creada_por=autor_id)
             if not (res.ok and res.requiere_gate and res.skill_id is not None):
                 return  # frenada por kill switch o no valía → silencio
             owner_id = self._owners.get_owner()
             if owner_id is None:
                 return
-            teclado = InlineKeyboardMarkup([[
-                InlineKeyboardButton("✅ Activar", callback_data=f"skok:{res.skill_id}"),
-                InlineKeyboardButton("❌ Descartar", callback_data=f"skno:{res.skill_id}"),
-            ]])
+            teclado = InlineKeyboardMarkup(
+                [
+                    [
+                        InlineKeyboardButton("✅ Activar", callback_data=f"skok:{res.skill_id}"),
+                        InlineKeyboardButton("❌ Descartar", callback_data=f"skno:{res.skill_id}"),
+                    ]
+                ]
+            )
             await msg.get_bot().send_message(
                 chat_id=owner_id,
-                text=(f"🤖 Aprendí algo y propongo una skill nueva: *{res.nombre}* "
-                      f"({res.categoria}).\nMírala con `/skills {res.nombre}` y decide:"),
-                parse_mode=ParseMode.MARKDOWN, reply_markup=teclado)
+                text=(
+                    f"🤖 Aprendí algo y propongo una skill nueva: *{res.nombre}* "
+                    f"({res.categoria}).\nMírala con `/skills {res.nombre}` y decide:"
+                ),
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=teclado,
+            )
         except Exception:  # noqa: BLE001 — la auto-mejora NUNCA tumba el bot
             logger.warning("auto-mejora en background falló (ignoro)", exc_info=True)
 
@@ -881,18 +948,23 @@ class TelegramChannel:
         except ValueError:
             return
         from for3s_core.aprende import aprobar_skill, rechazar_skill
+
         if accion == "skok":
             nombre = await aprobar_skill(self._pool, sid)
             await q.edit_message_text(
                 f"✅ Skill *{nombre or 'propuesta'}* activada. La usaré cuando aplique."
-                if nombre else "⚠️ Esa skill ya no estaba pendiente.",
-                parse_mode=ParseMode.MARKDOWN)
+                if nombre
+                else "⚠️ Esa skill ya no estaba pendiente.",
+                parse_mode=ParseMode.MARKDOWN,
+            )
         else:
             nombre = await rechazar_skill(self._pool, sid)
             await q.edit_message_text(
                 f"🗑️ Skill *{nombre or 'propuesta'}* descartada (archivada, recuperable)."
-                if nombre else "⚠️ Esa skill ya no estaba pendiente.",
-                parse_mode=ParseMode.MARKDOWN)
+                if nombre
+                else "⚠️ Esa skill ya no estaba pendiente.",
+                parse_mode=ParseMode.MARKDOWN,
+            )
 
     async def on_dmn_propuesta(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """H9-c: el dueño aprueba (dpok) o descarta (dpno) una propuesta del DMN
@@ -910,26 +982,33 @@ class TelegramChannel:
         except ValueError:
             return
         from for3s_core import dmn
+
         titulo = await dmn.resolver_propuesta(
-            self._pool, pid, aprobar=(accion == "dpok"),
-            por=q.from_user.id if q.from_user else None)
+            self._pool, pid, aprobar=(accion == "dpok"), por=q.from_user.id if q.from_user else None
+        )
         if accion == "dpok":
             await q.edit_message_text(
                 f"✅ Propuesta *{titulo or '?'}* aprobada (queda validada como idea)."
-                if titulo else "⚠️ Esa propuesta ya no estaba pendiente.",
-                parse_mode=ParseMode.MARKDOWN)
+                if titulo
+                else "⚠️ Esa propuesta ya no estaba pendiente.",
+                parse_mode=ParseMode.MARKDOWN,
+            )
         else:
             await q.edit_message_text(
                 f"🗑️ Propuesta *{titulo or '?'}* descartada."
-                if titulo else "⚠️ Esa propuesta ya no estaba pendiente.",
-                parse_mode=ParseMode.MARKDOWN)
+                if titulo
+                else "⚠️ Esa propuesta ya no estaba pendiente.",
+                parse_mode=ParseMode.MARKDOWN,
+            )
 
-    async def _correr_equipo_inner(self, msg, texto: str, scope_user_id=None,
-                                   *, sesion=None, autor_id=None) -> None:
+    async def _correr_equipo_inner(
+        self, msg, texto: str, scope_user_id=None, *, sesion=None, autor_id=None
+    ) -> None:
         """Lanza el EQUIPO (S4) + sintetiza (S5) + responde, con PROGRESO EN VIVO
         (pulido H8 área A): un mensaje que se edita mostrando cada specialist
         (⏳→🔄→🟢/🔴) + línea final de gasto. DEFENSIVO: si algo falla, NO rompe."""
         from for3s_core import multiagente
+
         provider = getattr(self._agent, "_provider", None)
         fam = multiagente.decidir_familia(texto)
         fam_txt = "técnicos" if fam == "tecnica" else "generales"
@@ -940,8 +1019,10 @@ class TelegramChannel:
 
         def _render() -> str:
             hechos = sum(1 for v in estado.values() if v != "⏳")
-            cab = (f"🤝 <b>Equipo trabajando</b> ({hechos}/{len(estado)} listos) — "
-                   f"especialistas {fam_txt}\n\n")
+            cab = (
+                f"🤝 <b>Equipo trabajando</b> ({hechos}/{len(estado)} listos) — "
+                f"especialistas {fam_txt}\n\n"
+            )
             lineas = []
             for nombre, bola in estado.items():
                 etq = multiagente._ETIQUETAS.get(nombre, nombre)
@@ -966,9 +1047,9 @@ class TelegramChannel:
         async def on_progreso(evento) -> None:
             if evento["tipo"] == "inicio":
                 for nombre in evento["nombres"]:
-                    estado[nombre] = "⏳"           # en cola
+                    estado[nombre] = "⏳"  # en cola
             elif evento["tipo"] == "trabajando":
-                estado[evento["nombre"]] = "🔄"      # A-i: en curso
+                estado[evento["nombre"]] = "🔄"  # A-i: en curso
             elif evento["tipo"] == "fin":
                 estado[evento["nombre"]] = "🟢" if evento["ok"] else "🔴"
             await _pintar()
@@ -978,7 +1059,8 @@ class TelegramChannel:
         typing = asyncio.create_task(_mantener_typing(msg.get_bot(), msg.chat_id))
         try:
             equipo = await multiagente.correr_equipo(
-                texto, provider=provider, familia=fam, on_progreso=on_progreso)
+                texto, provider=provider, familia=fam, on_progreso=on_progreso
+            )
             informe = await multiagente.sintetizar(equipo, provider=provider)
         finally:
             typing.cancel()
@@ -987,9 +1069,14 @@ class TelegramChannel:
         if self._pool is not None:
             try:
                 await memory.record_turn(
-                    self._pool, sesion or self._owner_session, role="assistant",
-                    content=informe, channel="telegram",
-                    owner_user_id=scope_user_id, telegram_user_id=autor_id)
+                    self._pool,
+                    sesion or self._owner_session,
+                    role="assistant",
+                    content=informe,
+                    channel="telegram",
+                    owner_user_id=scope_user_id,
+                    telegram_user_id=autor_id,
+                )
             except Exception:  # noqa: BLE001 — guardar memoria no debe romper la entrega
                 logger.warning("no pude guardar el informe del equipo en memoria")
 
@@ -998,10 +1085,15 @@ class TelegramChannel:
         # specialists no). Defensivo: el audit NUNCA rompe la entrega del informe.
         if self._pool is not None:
             from for3s_core import handoff
+
             await handoff.registrar_corrida(
-                self._pool, session_id=sesion or self._owner_session,
-                telegram_user_id=autor_id, tarea=texto, equipo=equipo,
-                informe=informe)
+                self._pool,
+                session_id=sesion or self._owner_session,
+                telegram_user_id=autor_id,
+                tarea=texto,
+                equipo=equipo,
+                informe=informe,
+            )
 
         # A2 — línea de gasto: tiempo · tokens · cupo (el del dueño por ahora; con
         # el apartado H = 1 key por persona, mostrará el de cada usuario).
@@ -1018,10 +1110,12 @@ class TelegramChannel:
         # A-iv: caso 0/N — TODOS los specialists fallaron. Mensaje honesto y
         # accionable en vez de un informe vacío/pobre.
         if equipo.n_ok == 0:
-            aviso = (f"⚠️ <b>El equipo no pudo completar el análisis</b> "
-                     f"(los {len(equipo.reportes)} especialistas fallaron — "
-                     f"probablemente saturación temporal). Reintenta en un momento."
-                     f"{cupo_txt}")
+            aviso = (
+                f"⚠️ <b>El equipo no pudo completar el análisis</b> "
+                f"(los {len(equipo.reportes)} especialistas fallaron — "
+                f"probablemente saturación temporal). Reintenta en un momento."
+                f"{cupo_txt}"
+            )
             try:
                 if prog["msg"] is not None:
                     await prog["msg"].edit_text(aviso, parse_mode=ParseMode.HTML)
@@ -1031,8 +1125,10 @@ class TelegramChannel:
                 pass
             return
 
-        resumen = (f"✅ <b>Equipo terminó</b> ({equipo.n_ok}/{len(equipo.reportes)} ok · "
-                   f"⏱ {equipo.segundos_total:.0f}s{toks}){cupo_txt}")
+        resumen = (
+            f"✅ <b>Equipo terminó</b> ({equipo.n_ok}/{len(equipo.reportes)} ok · "
+            f"⏱ {equipo.segundos_total:.0f}s{toks}){cupo_txt}"
+        )
         try:
             if prog["msg"] is not None:
                 await prog["msg"].edit_text(resumen, parse_mode=ParseMode.HTML)
@@ -1106,6 +1202,7 @@ class TelegramChannel:
             await msg.reply_text("⛔ Este bot es privado.")
             return
         from for3s_core.skills import SkillStore
+
         ss = SkillStore(self._pool)
         args = context.args or []
         if args:  # ver una skill concreta
@@ -1114,14 +1211,16 @@ class TelegramChannel:
                 await msg.reply_text("🧩 No encontré esa skill. Usa /skills para ver la lista.")
                 return
             await ss.registrar_uso(sk["id"])
-            await _enviar_html(msg, f"🧩 <b>{sk['nombre']}</b> ({sk['categoria']})\n\n"
-                               + sk["contenido"][:3500])
+            await _enviar_html(
+                msg, f"🧩 <b>{sk['nombre']}</b> ({sk['categoria']})\n\n" + sk["contenido"][:3500]
+            )
             return
         # listar
         lista = await ss.listar()
         if not lista:
             await msg.reply_text(
-                "🧩 Aún no tengo skills guardadas. Pronto podré aprenderlas (H12 /aprende).")
+                "🧩 Aún no tengo skills guardadas. Pronto podré aprenderlas (H12 /aprende)."
+            )
             return
         lineas = [f"🧩 *Skills de For3s* ({len(lista)}):", ""]
         for sk in lista:
@@ -1142,6 +1241,7 @@ class TelegramChannel:
             await msg.reply_text("⛔ Este bot es privado.")
             return
         from for3s_core.perfil import PerfilStore
+
         ps = PerfilStore(self._pool)
         args = context.args or []
         CAMPOS = ("rol", "stack", "estilo", "zona", "nombre")
@@ -1149,24 +1249,26 @@ class TelegramChannel:
         if len(args) >= 2 and args[0].lower() in CAMPOS:
             campo = args[0].lower()
             valor = " ".join(args[1:]).strip()[:120]
-            await ps.set_campo(user.id, campo, valor,
-                               nombre=getattr(user, "full_name", None))
-            await msg.reply_text(f"✅ Perfil actualizado: *{campo}* = {valor}",
-                                 parse_mode=ParseMode.MARKDOWN)
+            await ps.set_campo(user.id, campo, valor, nombre=getattr(user, "full_name", None))
+            await msg.reply_text(
+                f"✅ Perfil actualizado: *{campo}* = {valor}", parse_mode=ParseMode.MARKDOWN
+            )
             return
         # mostrar el perfil
         p = await ps.get(user.id)
         if not p or not any(p.get(c) for c in CAMPOS) and not p.get("rasgos"):
             await msg.reply_text(
-                "👤 Aún no tengo tu perfil. Cuéntame de ti (ej. \"soy backend\", "
-                "\"prefiero respuestas cortas\") o usa `/perfil rol <tu rol>`.\n\n"
-                "Campos: rol · stack · estilo · zona.", parse_mode=ParseMode.MARKDOWN)
+                '👤 Aún no tengo tu perfil. Cuéntame de ti (ej. "soy backend", '
+                '"prefiero respuestas cortas") o usa `/perfil rol <tu rol>`.\n\n'
+                "Campos: rol · stack · estilo · zona.",
+                parse_mode=ParseMode.MARKDOWN,
+            )
             return
         lineas = ["👤 *Tu perfil* (lo uso para adaptar mis respuestas):", ""]
         for c in CAMPOS:
             if p.get(c):
                 lineas.append(f"• {c}: {p[c]}")
-        for r in (p.get("rasgos") or []):
+        for r in p.get("rasgos") or []:
             lineas.append(f"• {r}")
         lineas.append("\n_Edita con `/perfil <campo> <valor>` o dímelo en el chat._")
         await msg.reply_text("\n".join(lineas), parse_mode=ParseMode.MARKDOWN)
@@ -1194,17 +1296,20 @@ class TelegramChannel:
         await msg.reply_text("🧠 Destilando una skill de lo que trabajamos…")
         try:
             from for3s_core.aprende import aprender_de_conversacion
+
             sesion = await self._sesion_de(user)
             res = await aprender_de_conversacion(
-                self._pool, provider, sesion, creada_por=user.id, foco=foco)
+                self._pool, provider, sesion, creada_por=user.id, foco=foco
+            )
         except Exception:  # noqa: BLE001 — aprender nunca debe tumbar el bot
             logger.warning("on_aprende falló", exc_info=True)
             await msg.reply_text("⚠️ Algo falló al destilar la skill. Inténtalo de nuevo.")
             return
         if res.ok:
             await msg.reply_text(
-                f"✅ {res.mensaje}\nLa usaré cuando aplique. Mírala con "
-                f"`/skills {res.nombre}`.", parse_mode=ParseMode.MARKDOWN)
+                f"✅ {res.mensaje}\nLa usaré cuando aplique. Mírala con `/skills {res.nombre}`.",
+                parse_mode=ParseMode.MARKDOWN,
+            )
         else:
             await msg.reply_text(f"ℹ️ {res.mensaje}")
 
@@ -1228,17 +1333,20 @@ class TelegramChannel:
             MAX_NEW_SKILLS_AUTO_PER_DAY,
             SkillEcosystemGovernor,
         )
+
         gov = SkillEcosystemGovernor(self._pool)
-        arg = (context.args[0].strip().lower() if context.args else "status")
+        arg = context.args[0].strip().lower() if context.args else "status"
 
         if arg in ("on", "off"):
-            await gov.set_autogen(arg == "on", por=user.id,
-                                  motivo=f"/autogen {arg} por el dueño")
+            await gov.set_autogen(arg == "on", por=user.id, motivo=f"/autogen {arg} por el dueño")
             estado = "🟢 ENCENDIDA" if arg == "on" else "🔴 APAGADA"
-            extra = ("\n\n⚠️ Aún no hay motor (H12): nada se auto-genera todavía, "
-                     "pero el freno queda listo." if arg == "on" else
-                     "\n\nLa auto-generación queda congelada. Tus skills y las creadas "
-                     "a mano siguen intactas.")
+            extra = (
+                "\n\n⚠️ Aún no hay motor (H12): nada se auto-genera todavía, "
+                "pero el freno queda listo."
+                if arg == "on"
+                else "\n\nLa auto-generación queda congelada. Tus skills y las creadas "
+                "a mano siguen intactas."
+            )
             await msg.reply_text(f"Auto-generación de skills: {estado}.{extra}")
             return
 
@@ -1277,16 +1385,21 @@ class TelegramChannel:
             dmn,
             dmn_tasks,  # noqa: F401 — registra las housekeeping
         )
+
         args = [a.strip().lower() for a in (context.args or [])]
         sub = args[0] if args else "status"
 
         # encender/apagar una clase: /dmn housekeeping on  ·  /dmn generativas off
         if sub in ("housekeeping", "generativas") and len(args) >= 2 and args[1] in ("on", "off"):
             clase = dmn.CLASE_HOUSEKEEPING if sub == "housekeeping" else dmn.CLASE_GENERATIVA
-            await dmn.set_clase(self._pool, clase, args[1] == "on", por=user.id,
-                                motivo=f"/dmn {sub} {args[1]} por el dueño")
-            await msg.reply_text(
-                f"DMN · {sub}: {'🟢 ON' if args[1] == 'on' else '🔴 OFF'}.")
+            await dmn.set_clase(
+                self._pool,
+                clase,
+                args[1] == "on",
+                por=user.id,
+                motivo=f"/dmn {sub} {args[1]} por el dueño",
+            )
+            await msg.reply_text(f"DMN · {sub}: {'🟢 ON' if args[1] == 'on' else '🔴 OFF'}.")
             return
 
         # forzar un ciclo ahora (ignora idle) — para probar
@@ -1303,14 +1416,19 @@ class TelegramChannel:
                 await msg.reply_text("🌙 No hay propuestas del DMN pendientes.")
                 return
             for pr in props:
-                teclado = InlineKeyboardMarkup([[
-                    InlineKeyboardButton("✅ Aprobar", callback_data=f"dpok:{pr.id}"),
-                    InlineKeyboardButton("❌ Descartar", callback_data=f"dpno:{pr.id}"),
-                ]])
+                teclado = InlineKeyboardMarkup(
+                    [
+                        [
+                            InlineKeyboardButton("✅ Aprobar", callback_data=f"dpok:{pr.id}"),
+                            InlineKeyboardButton("❌ Descartar", callback_data=f"dpno:{pr.id}"),
+                        ]
+                    ]
+                )
                 await msg.reply_text(
-                    f"💡 *{pr.tipo}* — {pr.titulo}\n\n{pr.contenido[:600]}\n\n"
-                    f"_(de {pr.task})_",
-                    parse_mode=ParseMode.MARKDOWN, reply_markup=teclado)
+                    f"💡 *{pr.tipo}* — {pr.titulo}\n\n{pr.contenido[:600]}\n\n_(de {pr.task})_",
+                    parse_mode=ParseMode.MARKDOWN,
+                    reply_markup=teclado,
+                )
             return
 
         # ROI por task (cada task se gana su lugar — H9-d)
@@ -1324,7 +1442,8 @@ class TelegramChannel:
             for r in rois:
                 lineas.append(
                     f"{emoji.get(r.recomendacion, '⚪')} `{r.task}` — corrió {r.corridas}× · "
-                    f"${r.costo_total:.2f} · {r.recomendacion}")
+                    f"${r.costo_total:.2f} · {r.recomendacion}"
+                )
             lineas.append("\n_🟡 revisar = gastó pero casi no produjo (candidata a apagar)._")
             await msg.reply_text("\n".join(lineas), parse_mode=ParseMode.MARKDOWN)
             return
@@ -1357,6 +1476,7 @@ class TelegramChannel:
             await msg.reply_text("⛔ Este bot es privado.")
             return
         from for3s_core import version as _ver
+
         sv = None
         if self._pool is not None:
             try:
@@ -1372,8 +1492,10 @@ class TelegramChannel:
         ]
         lineas += [f"• {c}" for c in nuevo["cambios"]]
         lineas.append("")
-        lineas.append("Hitos: H1-H4 (MVP) · H5 memoria · H6 se cuida · H7 /model · "
-                      "H8 equipo · H9 sueña · H10-12 aprende · metacognición (planea)")
+        lineas.append(
+            "Hitos: H1-H4 (MVP) · H5 memoria · H6 se cuida · H7 /model · "
+            "H8 equipo · H9 sueña · H10-12 aprende · metacognición (planea)"
+        )
         if sv is not None:
             lineas.append(f"_(esquema BD interno: v{sv})_")
         await msg.reply_text("\n".join(lineas), parse_mode=ParseMode.MARKDOWN)
@@ -1383,6 +1505,7 @@ class TelegramChannel:
         Solo el dueño. El enrutamiento automático (H7) está bloqueado: esto es la
         selección MANUAL del modelo que usa el bot."""
         from for3s_core import modelos
+
         msg, user = update.message, update.effective_user
         if msg is None or user is None:
             return
@@ -1393,17 +1516,22 @@ class TelegramChannel:
         botones = []
         for m in modelos.CATALOGO:
             check = " ✓" if m.id == actual else ""
-            botones.append([InlineKeyboardButton(
-                f"{m.nombre}{check} — {m.desc}", callback_data=f"model:{m.id}")])
+            botones.append(
+                [
+                    InlineKeyboardButton(
+                        f"{m.nombre}{check} — {m.desc}", callback_data=f"model:{m.id}"
+                    )
+                ]
+            )
         await msg.reply_text(
-            "🧠 *Selecciona el modelo de For3s OS*\n"
-            "(el que se usa para responder; ✓ = activo)",
+            "🧠 *Selecciona el modelo de For3s OS*\n(el que se usa para responder; ✓ = activo)",
             reply_markup=InlineKeyboardMarkup(botones),
         )
 
     async def on_model_select(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Botón de /model: guarda la selección y la aplica en caliente al provider."""
         from for3s_core import modelos
+
         q = update.callback_query
         if q is None or not q.data:
             return
@@ -1425,7 +1553,9 @@ class TelegramChannel:
                 prov.set_model(model_id)
             self._model = model_id
         await audit.append(
-            self._pool, actor="user", action="model_changed",
+            self._pool,
+            actor="user",
+            action="model_changed",
             detail={"model": model_id},
         )
         await q.edit_message_text(f"✅ Modelo cambiado a *{info.nombre}* ({info.id}).")
@@ -1444,15 +1574,21 @@ class TelegramChannel:
             await msg.reply_text("⛔ Solo el encargado puede abrir o cerrar la puerta.")
             return
         eid = await self._equipo.asegurar_equipo(
-            user.id, nombre_encargado=getattr(user, "full_name", None))
+            user.id, nombre_encargado=getattr(user, "full_name", None)
+        )
         abierta = await self._equipo.puerta_abierta(eid)
-        estado = "🟢 ABIERTA — quien me escriba entra al equipo" if abierta \
+        estado = (
+            "🟢 ABIERTA — quien me escriba entra al equipo"
+            if abierta
             else "🔴 CERRADA — solo el dueño y los que ya están dentro"
+        )
         n = len(await self._equipo.miembros(eid))
-        botones = [[
-            InlineKeyboardButton("🟢 Abrir puerta", callback_data="puerta:abrir"),
-            InlineKeyboardButton("🔴 Cerrar puerta", callback_data="puerta:cerrar"),
-        ]]
+        botones = [
+            [
+                InlineKeyboardButton("🟢 Abrir puerta", callback_data="puerta:abrir"),
+                InlineKeyboardButton("🔴 Cerrar puerta", callback_data="puerta:cerrar"),
+            ]
+        ]
         await msg.reply_text(
             f"🚪 *Puerta del equipo*\n\nEstado: {estado}\nMiembros: {n}\n\n"
             "Abre la puerta, pide a tu gente que me escriba, y ciérrala cuando "
@@ -1476,17 +1612,21 @@ class TelegramChannel:
         abrir = accion == "abrir"
         await self._equipo.set_puerta(eid, abrir)
         await audit.append(
-            self._pool, actor="user", action="puerta_equipo",
+            self._pool,
+            actor="user",
+            action="puerta_equipo",
             detail={"abierta": abrir, "equipo_id": eid},
         )
         if abrir:
             await q.edit_message_text(
                 "🟢 *Puerta ABIERTA.* Quien me escriba ahora entra al equipo.\n"
-                "Cuando ya estén todos, vuelve a /invitar y ciérrala.")
+                "Cuando ya estén todos, vuelve a /invitar y ciérrala."
+            )
         else:
             await q.edit_message_text(
                 "🔴 *Puerta CERRADA.* Ya nadie nuevo puede entrar; los que están "
-                "dentro siguen con acceso.")
+                "dentro siguen con acceso."
+            )
 
     async def on_gate_select(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Botones ✅/❌ del gate (E): el encargado aprueba/rechaza una acción
@@ -1507,8 +1647,7 @@ class TelegramChannel:
         if accion == "gateok":
             sol = await self._equipo.aprobar(sid, uid)
             if sol is None:
-                await q.edit_message_text(
-                    "⚠️ No pude aprobar (ya resuelta o no eres el encargado).")
+                await q.edit_message_text("⚠️ No pude aprobar (ya resuelta o no eres el encargado).")
                 return
             # E — EJECUTAR la write real desde el payload de la solicitud.
             payload = sol.payload or {}
@@ -1518,7 +1657,8 @@ class TelegramChannel:
             if name not in WRITE_TOOLS_PERMITIDAS or self._pat is None:
                 await q.edit_message_text(
                     f"✅ Aprobaste: {sol.descripcion}\n"
-                    "⚠️ Pero no pude ejecutar (acción no permitida o GitHub no disponible).")
+                    "⚠️ Pero no pude ejecutar (acción no permitida o GitHub no disponible)."
+                )
                 return
             await q.edit_message_text("⏳ Aprobado — ejecutando en GitHub…")
             try:
@@ -1529,21 +1669,36 @@ class TelegramChannel:
                 resultado = f"{type(exc).__name__}: {exc}"
                 ok = False
             await audit.append(
-                self._pool, actor="user", action="github_write_gate",
-                detail={"tool": name, "args": args, "ok": ok, "aprobado_por": uid,
-                        "solicitante": solicitante, "result": str(resultado)[:1000]})
+                self._pool,
+                actor="user",
+                action="github_write_gate",
+                detail={
+                    "tool": name,
+                    "args": args,
+                    "ok": ok,
+                    "aprobado_por": uid,
+                    "solicitante": solicitante,
+                    "result": str(resultado)[:1000],
+                },
+            )
             if ok:
                 await q.edit_message_text(
                     f"✅ Aprobado y ejecutado en GitHub.\n\n"
-                    f"<code>{str(resultado or '')[:500]}</code>", parse_mode=ParseMode.HTML)
+                    f"<code>{str(resultado or '')[:500]}</code>",
+                    parse_mode=ParseMode.HTML,
+                )
             else:
                 await q.edit_message_text(
-                    f"✅ Aprobaste, pero la ejecución falló: {str(resultado)[:300]}")
+                    f"✅ Aprobaste, pero la ejecución falló: {str(resultado)[:300]}"
+                )
             # avisar al MIEMBRO solicitante (proactivo, defensivo)
             if solicitante:
                 try:
-                    txt = ("✅ El encargado aprobó tu acción y se ejecutó en GitHub."
-                           if ok else "⚠️ El encargado la aprobó pero la ejecución falló.")
+                    txt = (
+                        "✅ El encargado aprobó tu acción y se ejecutó en GitHub."
+                        if ok
+                        else "⚠️ El encargado la aprobó pero la ejecución falló."
+                    )
                     await context.bot.send_message(chat_id=solicitante, text=txt)
                 except Exception:  # noqa: BLE001
                     pass
@@ -1551,7 +1706,8 @@ class TelegramChannel:
             sol = await self._equipo.rechazar(sid, uid)
             if sol is None:
                 await q.edit_message_text(
-                    "⚠️ No pude rechazar (ya resuelta o no eres el encargado).")
+                    "⚠️ No pude rechazar (ya resuelta o no eres el encargado)."
+                )
                 return
             await q.edit_message_text(f"❌ Rechazaste: {sol.descripcion}")
             # avisar al miembro que fue rechazada
@@ -1560,7 +1716,8 @@ class TelegramChannel:
                 try:
                     await context.bot.send_message(
                         chat_id=solicitante,
-                        text="❌ El encargado no aprobó tu acción de escritura.")
+                        text="❌ El encargado no aprobó tu acción de escritura.",
+                    )
                 except Exception:  # noqa: BLE001
                     pass
 
@@ -1582,13 +1739,15 @@ class TelegramChannel:
             await msg.reply_text(
                 f"📁 Tu tema activo: *{activo}*\n\nUsa `/tema <nombre>` para crear o "
                 "cambiar de tema, o /temas para ver los tuyos.",
-                parse_mode=ParseMode.MARKDOWN)
+                parse_mode=ParseMode.MARKDOWN,
+            )
             return
         slug = await self._temas.cambiar(user.id, arg)
         await msg.reply_text(
             f"📁 Tema activo: *{slug}*\nA partir de ahora hablamos en este hilo, "
             "separado de los demás. (Tu memoria/conocimiento se sigue compartiendo.)",
-            parse_mode=ParseMode.MARKDOWN)
+            parse_mode=ParseMode.MARKDOWN,
+        )
 
     async def on_temas(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """/temas — lista los temas de QUIEN escribe, con botones para cambiar."""
@@ -1603,14 +1762,19 @@ class TelegramChannel:
         if not lista:
             await msg.reply_text(
                 "📁 Aún no tienes temas (estás en *general*).\nCrea uno con "
-                "`/tema <nombre>` — ej. `/tema backend`.", parse_mode=ParseMode.MARKDOWN)
+                "`/tema <nombre>` — ej. `/tema backend`.",
+                parse_mode=ParseMode.MARKDOWN,
+            )
             return
-        botones = [[InlineKeyboardButton(
-            f"📁 {n}{' ✓' if a else ''}", callback_data=f"tema:{n}")]
-            for n, a in lista]
+        botones = [
+            [InlineKeyboardButton(f"📁 {n}{' ✓' if a else ''}", callback_data=f"tema:{n}")]
+            for n, a in lista
+        ]
         await msg.reply_text(
             "📁 *Tus temas* (✓ = activo). Toca uno para cambiar:",
-            reply_markup=InlineKeyboardMarkup(botones), parse_mode=ParseMode.MARKDOWN)
+            reply_markup=InlineKeyboardMarkup(botones),
+            parse_mode=ParseMode.MARKDOWN,
+        )
 
     async def on_tema_select(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Botón de /temas: cambia al tema elegido (de quien toca el botón)."""
@@ -1629,7 +1793,8 @@ class TelegramChannel:
         slug = await self._temas.cambiar(uid, nombre)
         await q.edit_message_text(
             f"📁 Tema activo: *{slug}*\nHablamos en este hilo de ahora en adelante.",
-            parse_mode=ParseMode.MARKDOWN)
+            parse_mode=ParseMode.MARKDOWN,
+        )
 
     async def on_equipo_sugerido(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """B (pulido H8): botones de la sugerencia de equipo. 🤝 → lanza el equipo
@@ -1659,8 +1824,12 @@ class TelegramChannel:
         scope = None if self._owners.is_authorized(uid) else uid
         try:
             await self._correr_equipo_y_responder(
-                q.message, texto, scope_user_id=scope,
-                sesion=await self._sesion_de(q.from_user), autor_id=uid)
+                q.message,
+                texto,
+                scope_user_id=scope,
+                sesion=await self._sesion_de(q.from_user),
+                autor_id=uid,
+            )
         except Exception:  # noqa: BLE001 — el equipo no debe tumbar el bot
             logger.warning("equipo (sugerido) falló", exc_info=True)
             await self._responder_agente_simple(q, texto, q.from_user)
@@ -1670,11 +1839,18 @@ class TelegramChannel:
         cuando el usuario elige '💬 responde tú solo' en la sugerencia de equipo."""
         try:
             sesion = await self._sesion_de(user)
-            convo = Conversation(self._pool, self._agent, sesion, channel="telegram",
-                                 telegram_user_id=user.id, scope_user_id=self._scope_de(user))
+            convo = Conversation(
+                self._pool,
+                self._agent,
+                sesion,
+                channel="telegram",
+                telegram_user_id=user.id,
+                scope_user_id=self._scope_de(user),
+            )
             ctx_t = tiempo.contexto_temporal(getattr(user, "language_code", None))
             resp = await asyncio.wait_for(
-                convo.send(texto, max_tokens=2048, contexto=ctx_t), timeout=ANALYSIS_TIMEOUT)
+                convo.send(texto, max_tokens=2048, contexto=ctx_t), timeout=ANALYSIS_TIMEOUT
+            )
             await _enviar_html(q.message, resp.text)
         except Exception:  # noqa: BLE001
             logger.exception("fallo respondiendo (agente simple desde sugerencia)")
@@ -1705,15 +1881,21 @@ class TelegramChannel:
             if m.user_id == objetivo:
                 nombre = m.nombre or "ese miembro"
                 break
-        teclado = InlineKeyboardMarkup([[
-            InlineKeyboardButton("✅ Sí, sacar", callback_data=f"kok:{objetivo}"),
-            InlineKeyboardButton("❌ Cancelar", callback_data="kno:0"),
-        ]])
+        teclado = InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton("✅ Sí, sacar", callback_data=f"kok:{objetivo}"),
+                    InlineKeyboardButton("❌ Cancelar", callback_data="kno:0"),
+                ]
+            ]
+        )
         await q.edit_message_text(
             f"⚠️ ¿Seguro que quieres sacar a *{nombre}* del equipo?\n"
             "Perderá el acceso (su historial se conserva). No re-entra por la puerta "
             "abierta; solo si lo vuelves a invitar.",
-            parse_mode=ParseMode.MARKDOWN, reply_markup=teclado)
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=teclado,
+        )
 
     async def on_kick_confirm(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """C-v: confirma o cancela el kick. Ejecuta sacar_miembro (verifica en BD)."""
@@ -1740,16 +1922,19 @@ class TelegramChannel:
         ok, motivo = await self._equipo.sacar_miembro(eid, uid, objetivo)
         if ok:
             await audit.append(
-                self._pool, actor="user", action="miembro_sacado",
-                detail={"equipo_id": eid, "objetivo": objetivo})
-            await q.edit_message_text(
-                "✅ Listo. Esa persona ya no tiene acceso al equipo.")
+                self._pool,
+                actor="user",
+                action="miembro_sacado",
+                detail={"equipo_id": eid, "objetivo": objetivo},
+            )
+            await q.edit_message_text("✅ Listo. Esa persona ya no tiene acceso al equipo.")
             # avisar al sacado (proactivo, defensivo)
             try:
                 await context.bot.send_message(
                     chat_id=objetivo,
                     text="ℹ️ El encargado te quitó el acceso a este equipo. "
-                    "Si crees que fue un error, contáctalo.")
+                    "Si crees que fue un error, contáctalo.",
+                )
             except Exception:  # noqa: BLE001
                 pass
         else:
@@ -1777,7 +1962,8 @@ class TelegramChannel:
         if eid is None:
             await msg.reply_text(
                 "👥 Aún no has armado equipo — eres el único usuario.\n"
-                "Usa /invitar para abrir la puerta y que entren otras personas.")
+                "Usa /invitar para abrir la puerta y que entren otras personas."
+            )
             return
         miembros = await self._equipo.miembros(eid)
         abierta = await self._equipo.puerta_abierta(eid)
@@ -1792,11 +1978,15 @@ class TelegramChannel:
             lineas.append(f"{icono} {nombre} — {m.rol} · {act}")
             # C-v: botón [🚫 Sacar] por cada MIEMBRO (no el encargado, no se autosaca)
             if m.rol != equipo_mod.ROL_ENCARGADO:
-                botones.append([InlineKeyboardButton(
-                    f"🚫 Sacar a {nombre}", callback_data=f"kick:{m.user_id}")])
+                botones.append(
+                    [
+                        InlineKeyboardButton(
+                            f"🚫 Sacar a {nombre}", callback_data=f"kick:{m.user_id}"
+                        )
+                    ]
+                )
         teclado = InlineKeyboardMarkup(botones) if botones else None
-        await msg.reply_text("\n".join(lineas), parse_mode=ParseMode.MARKDOWN,
-                             reply_markup=teclado)
+        await msg.reply_text("\n".join(lineas), parse_mode=ParseMode.MARKDOWN, reply_markup=teclado)
 
     async def on_hilos(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """/hilos — cada persona ve SUS hilos (temas) + su actividad. Complementa
@@ -1904,7 +2094,8 @@ class TelegramChannel:
             if motivo == "puerta_cerrada":
                 await msg.reply_text(
                     "🔴 La puerta de este equipo está cerrada. Pídele al encargado "
-                    "que la abra (con /invitar) para poder entrar.")
+                    "que la abra (con /invitar) para poder entrar."
+                )
             else:
                 await msg.reply_text("⛔ Este bot es privado.")
             return
@@ -1932,8 +2123,12 @@ class TelegramChannel:
             try:
                 # #6: guardar el informe en el HILO de esta persona, con su autoría
                 await self._correr_equipo_y_responder(
-                    msg, texto, scope_user_id=scope,
-                    sesion=await self._sesion_de(user), autor_id=user.id)
+                    msg,
+                    texto,
+                    scope_user_id=scope,
+                    sesion=await self._sesion_de(user),
+                    autor_id=user.id,
+                )
                 return
             except Exception:  # noqa: BLE001 — el equipo no debe tumbar el bot
                 logger.warning("equipo multi-agente falló, caigo a 1 agente", exc_info=True)
@@ -1944,15 +2139,23 @@ class TelegramChannel:
             self._sug_seq += 1
             sid_sug = f"s{self._sug_seq}"
             self._equipo_sugerido[sid_sug] = {"texto": texto, "user_id": user.id}
-            teclado = InlineKeyboardMarkup([[
-                InlineKeyboardButton("🤝 Lanzar equipo", callback_data=f"eqsi:{sid_sug}"),
-                InlineKeyboardButton("💬 Responde tú solo", callback_data=f"eqno:{sid_sug}"),
-            ]])
+            teclado = InlineKeyboardMarkup(
+                [
+                    [
+                        InlineKeyboardButton("🤝 Lanzar equipo", callback_data=f"eqsi:{sid_sug}"),
+                        InlineKeyboardButton(
+                            "💬 Responde tú solo", callback_data=f"eqno:{sid_sug}"
+                        ),
+                    ]
+                ]
+            )
             try:
                 await msg.reply_text(
                     "💡 Esto se beneficiaría de mi <b>equipo</b> (varios especialistas "
                     "en paralelo, tarda un poco más). ¿Lo lanzo o te respondo yo solo?",
-                    parse_mode=ParseMode.HTML, reply_markup=teclado)
+                    parse_mode=ParseMode.HTML,
+                    reply_markup=teclado,
+                )
                 return
             except Exception:  # noqa: BLE001 — si falla la oferta, sigue normal
                 self._equipo_sugerido.pop(sid_sug, None)
@@ -1964,8 +2167,14 @@ class TelegramChannel:
         # #6 HILO POR USUARIO + AI2 TEMAS: sesión de la persona en su tema activo.
         # El autor se graba en cada turno (#3).
         sesion = await self._sesion_de(user)
-        convo = Conversation(self._pool, self._agent, sesion, channel="telegram",
-                             telegram_user_id=user.id, scope_user_id=self._scope_de(user))
+        convo = Conversation(
+            self._pool,
+            self._agent,
+            sesion,
+            channel="telegram",
+            telegram_user_id=user.id,
+            scope_user_id=self._scope_de(user),
+        )
         # "escribiendo..." PERSISTENTE: tarea en segundo plano que lo mantiene
         # vivo mientras el agente trabaja (análisis MCP tardan 30-60s). Se
         # cancela en el finally pase lo que pase, para no dejarla colgada.
@@ -1992,11 +2201,28 @@ class TelegramChannel:
         # intención y forzamos repo_completo=None para que caiga en `usa_tools`.
         _t_w = normalizar(texto)
         _PALABRAS_ESCRITURA = (
-            "comenta", "comentar", "comentario", "crea un issue", "crear issue",
-            "crea issue", "abre un issue", "abrir issue", "abre issue",
-            "crea un pr", "crear pr", "crea pr", "abre un pr", "abrir pr",
-            "abre pr", "crea un pull", "crear pull", "haz un pull",
-            "responde en el issue", "responde al issue", "review", "revisa el pr",
+            "comenta",
+            "comentar",
+            "comentario",
+            "crea un issue",
+            "crear issue",
+            "crea issue",
+            "abre un issue",
+            "abrir issue",
+            "abre issue",
+            "crea un pr",
+            "crear pr",
+            "crea pr",
+            "abre un pr",
+            "abrir pr",
+            "abre pr",
+            "crea un pull",
+            "crear pull",
+            "haz un pull",
+            "responde en el issue",
+            "responde al issue",
+            "review",
+            "revisa el pr",
         )
         quiere_escribir = usa_tools and any(p in _t_w for p in _PALABRAS_ESCRITURA)
         if quiere_escribir:
@@ -2007,16 +2233,31 @@ class TelegramChannel:
         # minucioso/exhaustivo/a fondo" → PROFUNDO (capas + recencia). Normalizado
         # (sin acentos/mayúsculas) para que no falle por cómo lo escriba.
         _t = normalizar(texto)
-        _PALABRAS_PROFUNDO = ("profundidad", "profundo", "minucios", "a detalle",
-                              "detallado", "exhaustiv", "a fondo", "completo", "minuciso")
+        _PALABRAS_PROFUNDO = (
+            "profundidad",
+            "profundo",
+            "minucios",
+            "a detalle",
+            "detallado",
+            "exhaustiv",
+            "a fondo",
+            "completo",
+            "minuciso",
+        )
         modo_profundo = any(p in _t for p in _PALABRAS_PROFUNDO)
         # Intención de CONTINUAR un mapeo cortado (2026-06-17): solo si pide
         # explícitamente lo faltante/cobertura Y NO trae una URL nueva de repo.
-        _PALABRAS_CONTINUAR = ("faltante", "lo que falta", "elementos faltant",
-                               "continua el analisis", "continua con", "termina el analisis",
-                               "lo que quedo", "leidos")
-        quiere_continuar = (repo_completo is None
-                            and any(p in _t for p in _PALABRAS_CONTINUAR))
+        _PALABRAS_CONTINUAR = (
+            "faltante",
+            "lo que falta",
+            "elementos faltant",
+            "continua el analisis",
+            "continua con",
+            "termina el analisis",
+            "lo que quedo",
+            "leidos",
+        )
+        quiere_continuar = repo_completo is None and any(p in _t for p in _PALABRAS_CONTINUAR)
         # Detectar ORGANIZACION (github.com/NOMBRE sin /repo). Si es org, NO se
         # corre el flujo tool-use (alucinaba un repo y colgaba) -> se listan los
         # repos y se pregunta cual. Solo si NO es un repo concreto.
@@ -2071,9 +2312,7 @@ class TelegramChannel:
                 # de los archivos que faltaron, CON marcador (no improvisar).
                 pendiente = None
                 if quiere_continuar:
-                    pendiente = await memory.get_progreso_pendiente(
-                        self._pool, sesion
-                    )
+                    pendiente = await memory.get_progreso_pendiente(self._pool, sesion)
                 if pendiente is not None:
                     owner_p, repo_p = pendiente["owner"], pendiente["repo"]
 
@@ -2088,7 +2327,8 @@ class TelegramChannel:
 
                     resp = await asyncio.wait_for(
                         convo.continuar_repo_pendiente(
-                            texto, self._mcp, pendiente, progreso=_prog_cont),
+                            texto, self._mcp, pendiente, progreso=_prog_cont
+                        ),
                         timeout=REPO_TIMEOUT,
                     )
                 elif org is not None:
@@ -2117,8 +2357,12 @@ class TelegramChannel:
                     _progreso = crear_progreso_categorias(context, msg.chat_id, _titulo_map)
                     resp = await asyncio.wait_for(
                         convo.analizar_repo_completo(
-                            texto, self._mcp, owner, repo,
-                            progreso=_progreso, profundo=modo_profundo,
+                            texto,
+                            self._mcp,
+                            owner,
+                            repo,
+                            progreso=_progreso,
+                            profundo=modo_profundo,
                         ),
                         timeout=REPO_TIMEOUT,
                     )
@@ -2130,6 +2374,7 @@ class TelegramChannel:
                 elif url_web is not None:
                     # leer la URL pública y dársela a Claude para que responda
                     from for3s_core.web_fetch import fetch_url
+
                     ok, contenido = await fetch_url(url_web)
                     if ok:
                         prompt_web = (
@@ -2156,8 +2401,11 @@ class TelegramChannel:
                         if _m:
                             _titulo = _m.group(1).strip()[:200]
                     await memory.save_consulted_web(
-                        self._pool, session_id=sesion, url=url_web,
-                        titulo=_titulo, descripcion=resp.text,
+                        self._pool,
+                        session_id=sesion,
+                        url=url_web,
+                        titulo=_titulo,
+                        descripcion=resp.text,
                         workspace_id=sesion,
                     )
                 else:
@@ -2225,7 +2473,7 @@ class TelegramChannel:
         if name == "add_issue_comment":
             n = args.get("issue_number", "?")
             cuerpo = (args.get("body") or "").strip()
-            return (f"💬 Comentar en <b>{r}#{n}</b>:\n\n«{cuerpo[:500]}»")
+            return f"💬 Comentar en <b>{r}#{n}</b>:\n\n«{cuerpo[:500]}»"
         if name == "create_issue":
             t = args.get("title", "?")
             cuerpo = (args.get("body") or "").strip()
@@ -2235,13 +2483,12 @@ class TelegramChannel:
             t = args.get("title", "?")
             head = args.get("head", "?")
             base = args.get("base", "?")
-            return (f"🔀 Crear PR en <b>{r}</b>:\n\n<b>{t}</b>\n"
-                    f"({head} → {base})")
+            return f"🔀 Crear PR en <b>{r}</b>:\n\n<b>{t}</b>\n({head} → {base})"
         if name == "create_pull_request_review":
             n = args.get("pull_number", "?")
             ev = args.get("event", "COMMENT")
             cuerpo = (args.get("body") or "").strip()
-            return (f"📝 Review en PR <b>{r}#{n}</b> (event={ev}):\n\n«{cuerpo[:500]}»")
+            return f"📝 Review en PR <b>{r}#{n}</b> (event={ev}):\n\n«{cuerpo[:500]}»"
         return f"✍️ {name} en {r}"
 
     async def _proponer_write(self, msg, user, accion: dict, context=None) -> None:
@@ -2270,17 +2517,25 @@ class TelegramChannel:
         self._write_seq += 1
         wid = f"w{self._write_seq}"
         self._writes_pendientes[wid] = {
-            "name": name, "args": args, "user_id": user_id, "ts": time.time(),
+            "name": name,
+            "args": args,
+            "user_id": user_id,
+            "ts": time.time(),
         }
-        teclado = InlineKeyboardMarkup([[
-            InlineKeyboardButton("✅ Confirmar", callback_data=f"wok:{wid}"),
-            InlineKeyboardButton("❌ Cancelar", callback_data=f"wno:{wid}"),
-        ]])
+        teclado = InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton("✅ Confirmar", callback_data=f"wok:{wid}"),
+                    InlineKeyboardButton("❌ Cancelar", callback_data=f"wno:{wid}"),
+                ]
+            ]
+        )
         try:
             await msg.reply_text(
                 f"⚠️ <b>Acción de escritura en GitHub</b> — necesito tu confirmación:\n\n"
                 f"{preview}\n\n<i>Nada se escribe hasta que pulses Confirmar.</i>",
-                parse_mode=ParseMode.HTML, reply_markup=teclado,
+                parse_mode=ParseMode.HTML,
+                reply_markup=teclado,
             )
         except Exception:
             logger.exception("no pude mostrar el botón de confirmación de write")
@@ -2291,6 +2546,7 @@ class TelegramChannel:
         y avisa al ENCARGADO con [✅ Aprobar][❌ Rechazar]. La write NO se ejecuta
         hasta que el encargado apruebe (on_gate_select). DEFENSIVO."""
         import json as _json  # noqa: F401 (equipo.crear_solicitud serializa)
+
         owner_id = self._owners.get_owner()
         eid = await self._equipo.equipo_de(user.id)
         if eid is None or owner_id is None:
@@ -2299,23 +2555,36 @@ class TelegramChannel:
         nombre = getattr(user, "full_name", None) or "Un miembro"
         descripcion = f"{nombre}: {preview}"
         sid = await self._equipo.crear_solicitud(
-            eid, user.id, "accion_sensible", descripcion,
-            payload={"tool": name, "args": args, "solicitante": user.id, "nombre": nombre})
+            eid,
+            user.id,
+            "accion_sensible",
+            descripcion,
+            payload={"tool": name, "args": args, "solicitante": user.id, "nombre": nombre},
+        )
         # avisar al miembro
         await msg.reply_text(
             "⏳ Esta acción de escritura en GitHub necesita la aprobación del "
-            "encargado. Se la envié — te aviso cuando decida.")
+            "encargado. Se la envié — te aviso cuando decida."
+        )
         # avisar al ENCARGADO (proactivo) con los botones del gate
-        teclado = InlineKeyboardMarkup([[
-            InlineKeyboardButton("✅ Aprobar", callback_data=f"gateok:{sid}"),
-            InlineKeyboardButton("❌ Rechazar", callback_data=f"gateno:{sid}"),
-        ]])
+        teclado = InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton("✅ Aprobar", callback_data=f"gateok:{sid}"),
+                    InlineKeyboardButton("❌ Rechazar", callback_data=f"gateno:{sid}"),
+                ]
+            ]
+        )
         try:
             await context.bot.send_message(
                 chat_id=owner_id,
-                text=(f"🔐 <b>Solicitud de escritura</b> de un miembro:\n\n{preview}\n\n"
-                      f"<i>Pedido por {nombre}. Nada se ejecuta hasta que apruebes.</i>"),
-                parse_mode=ParseMode.HTML, reply_markup=teclado)
+                text=(
+                    f"🔐 <b>Solicitud de escritura</b> de un miembro:\n\n{preview}\n\n"
+                    f"<i>Pedido por {nombre}. Nada se ejecuta hasta que apruebes.</i>"
+                ),
+                parse_mode=ParseMode.HTML,
+                reply_markup=teclado,
+            )
         except Exception:  # noqa: BLE001
             logger.warning("no pude avisar al encargado de la solicitud de write")
 
@@ -2345,7 +2614,9 @@ class TelegramChannel:
 
         if accion_cb == "wno":
             await audit.append(
-                self._pool, actor="user", action="github_write_cancelado",
+                self._pool,
+                actor="user",
+                action="github_write_cancelado",
                 detail={"tool": pend["name"], "args": pend["args"]},
             )
             await q.edit_message_text("❌ Cancelado. No se escribió nada en GitHub.")
@@ -2366,7 +2637,9 @@ class TelegramChannel:
             ok = False
         # AUDIT inmutable de la escritura (pase lo que pase).
         await audit.append(
-            self._pool, actor="user", action="github_write",
+            self._pool,
+            actor="user",
+            action="github_write",
             detail={"tool": name, "args": args, "ok": ok, "result": resultado[:1000]},
         )
         if ok:
@@ -2375,9 +2648,7 @@ class TelegramChannel:
                 parse_mode=ParseMode.HTML,
             )
         else:
-            await q.edit_message_text(
-                f"❌ No se pudo ejecutar: {resultado[:400]}"
-            )
+            await q.edit_message_text(f"❌ No se pudo ejecutar: {resultado[:400]}")
 
     async def on_adjunto(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Procesa una FOTO o un DOCUMENTO (PDF/Word/Excel) adjunto (multimodal,
@@ -2403,7 +2674,7 @@ class TelegramChannel:
         nombre = ""
         mime = ""
         if msg.photo:
-            tg_file = msg.photo[-1]          # la última = mayor resolución
+            tg_file = msg.photo[-1]  # la última = mayor resolución
             nombre = "foto.jpg"
             mime = "image/jpeg"
         elif msg.document:
@@ -2416,8 +2687,14 @@ class TelegramChannel:
         ctx_tiempo = tiempo.contexto_temporal(getattr(user, "language_code", None))
         # #6 hilo por usuario + AI2 tema activo
         sesion = await self._sesion_de(user)
-        convo = Conversation(self._pool, self._agent, sesion, channel="telegram",
-                             telegram_user_id=user.id, scope_user_id=self._scope_de(user))
+        convo = Conversation(
+            self._pool,
+            self._agent,
+            sesion,
+            channel="telegram",
+            telegram_user_id=user.id,
+            scope_user_id=self._scope_de(user),
+        )
         typing_task = asyncio.create_task(_mantener_typing(context.bot, msg.chat_id))
         etiqueta = multimodal.descripcion_corta(nombre, mime)
         caption = (msg.caption or "").strip()
@@ -2458,28 +2735,31 @@ class TelegramChannel:
             try:
                 resp = await asyncio.wait_for(
                     convo.send(
-                        nota_memoria, prompt=pregunta, max_tokens=2048,
-                        contexto=ctx_tiempo, adjuntos=bloques,
+                        nota_memoria,
+                        prompt=pregunta,
+                        max_tokens=2048,
+                        contexto=ctx_tiempo,
+                        adjuntos=bloques,
                     ),
                     timeout=ANALYSIS_TIMEOUT,
                 )
             except TimeoutError:
                 await _responder_seguro(
-                    msg, "⏱️ Ese archivo tardó demasiado en procesarse. Reintenta, "
-                    "y si vuelve a pasar avísame."
+                    msg,
+                    "⏱️ Ese archivo tardó demasiado en procesarse. Reintenta, "
+                    "y si vuelve a pasar avísame.",
                 )
                 return
             except RateLimitExceeded as exc:
                 await _responder_seguro(
-                    msg, f"⏳ Topé el límite de uso de Claude por ahora. {exc} "
-                    "Espera ~1 min y reintenta."
+                    msg,
+                    f"⏳ Topé el límite de uso de Claude por ahora. {exc} "
+                    "Espera ~1 min y reintenta.",
                 )
                 return
             except Exception:
                 logger.exception("error procesando adjunto")
-                await _responder_seguro(
-                    msg, "❌ Algo falló leyendo ese archivo. Intenta de nuevo."
-                )
+                await _responder_seguro(msg, "❌ Algo falló leyendo ese archivo. Intenta de nuevo.")
                 return
         finally:
             typing_task.cancel()
@@ -2488,8 +2768,11 @@ class TelegramChannel:
         # Apartado ARCHIVOS (2026-06-19): registrar tipo + nombre + resumen
         # (el análisis de Claude) + cuándo. SIN el binario. Defensivo.
         await memory.save_consulted_file(
-            self._pool, session_id=sesion,
-            tipo=etiqueta, nombre=nombre, resumen=resp.text,
+            self._pool,
+            session_id=sesion,
+            tipo=etiqueta,
+            nombre=nombre,
+            resumen=resp.text,
             workspace_id=sesion,
         )
         await self._update_cupo_pin(context, msg.chat_id, resp.usage_5h, resp.usage_7d)
@@ -2573,9 +2856,9 @@ def main() -> int:
     app.add_handler(CommandHandler("reiniciar", channel.on_reiniciar))
     app.add_handler(CommandHandler("reiniciar_duro", channel.on_reiniciar_duro))
     app.add_handler(CommandHandler("invitar", channel.on_invitar))  # H8 S10e: la puerta
-    app.add_handler(CommandHandler("tema", channel.on_tema))    # AI2: cambiar tema
+    app.add_handler(CommandHandler("tema", channel.on_tema))  # AI2: cambiar tema
     app.add_handler(CommandHandler("temas", channel.on_temas))  # AI2: listar temas
-    app.add_handler(CommandHandler("hilos", channel.on_hilos))        # AI7: vista hilos
+    app.add_handler(CommandHandler("hilos", channel.on_hilos))  # AI7: vista hilos
     app.add_handler(CommandHandler("miembros", channel.on_miembros))  # AI7: equipo
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, channel.on_message))
     # Multimodal (2026-06-18): fotos y documentos (PDF/Word/Excel). Van

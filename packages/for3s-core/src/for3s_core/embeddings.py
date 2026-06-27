@@ -37,6 +37,7 @@ def _get_modelo():
             if _modelo is None:  # doble check dentro del lock
                 logger.info("cargando modelo de embeddings %s (1ª vez, ~160s)...", MODELO_NOMBRE)
                 from sentence_transformers import SentenceTransformer
+
                 _modelo = SentenceTransformer(MODELO_NOMBRE, device="cpu")
                 logger.info("modelo de embeddings cargado")
     return _modelo

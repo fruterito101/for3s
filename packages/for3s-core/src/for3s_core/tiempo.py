@@ -53,8 +53,21 @@ def ahora_local(zona: str | None = None) -> datetime:
 
 
 _DIAS = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo")
-_MESES = ("", "enero", "febrero", "marzo", "abril", "mayo", "junio", "julio",
-          "agosto", "septiembre", "octubre", "noviembre", "diciembre")
+_MESES = (
+    "",
+    "enero",
+    "febrero",
+    "marzo",
+    "abril",
+    "mayo",
+    "junio",
+    "julio",
+    "agosto",
+    "septiembre",
+    "octubre",
+    "noviembre",
+    "diciembre",
+)
 
 
 def contexto_temporal(language_code: str | None = None, zona: str | None = None) -> str:
@@ -65,5 +78,7 @@ def contexto_temporal(language_code: str | None = None, zona: str | None = None)
     n = ahora_local(z)
     dia = _DIAS[n.weekday()]
     h12 = n.strftime("%I:%M %p").lstrip("0").lower().replace("am", "a. m.").replace("pm", "p. m.")
-    return (f"Fecha y hora actual DEL USUARIO (no del servidor): {dia} "
-            f"{n.day} de {_MESES[n.month]} de {n.year}, {h12} (zona {z}).")
+    return (
+        f"Fecha y hora actual DEL USUARIO (no del servidor): {dia} "
+        f"{n.day} de {_MESES[n.month]} de {n.year}, {h12} (zona {z})."
+    )

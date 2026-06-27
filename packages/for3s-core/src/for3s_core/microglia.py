@@ -23,8 +23,8 @@ import asyncpg
 logger = logging.getLogger("for3s.microglia")
 
 # Las 3 condiciones para ser candidato a olvido (TODAS deben cumplirse).
-DIAS_MINIMO = 30          # más viejo que esto (created_at)
-RELEVANCE_MAXIMA = 0.3    # menos relevante que esto
+DIAS_MINIMO = 30  # más viejo que esto (created_at)
+RELEVANCE_MAXIMA = 0.3  # menos relevante que esto
 # (la 3ª condición es consolidated_to_kg = true)
 
 
@@ -34,14 +34,17 @@ class Candidato:
 
     seq: int
     role: str
-    preview: str          # primeros chars del contenido (para reconocerlo)
-    dias: float           # antigüedad en días
+    preview: str  # primeros chars del contenido (para reconocerlo)
+    dias: float  # antigüedad en días
     relevance: float | None
 
 
 async def evaluar_candidatos(
-    pool: asyncpg.Pool, session_id: str, *,
-    dias_minimo: int = DIAS_MINIMO, relevance_max: float = RELEVANCE_MAXIMA,
+    pool: asyncpg.Pool,
+    session_id: str,
+    *,
+    dias_minimo: int = DIAS_MINIMO,
+    relevance_max: float = RELEVANCE_MAXIMA,
     limite: int = 1000,
 ) -> list[Candidato]:
     """DRY-RUN PURO: devuelve los episodios candidatos a olvido SIN borrar nada.
@@ -67,18 +70,26 @@ async def evaluar_candidatos(
             "  AND created_at < now() - make_interval(days => $3) "
             "ORDER BY relevance ASC, dias DESC "
             "LIMIT $4",
-            session_id, relevance_max, dias_minimo, limite,
+            session_id,
+            relevance_max,
+            dias_minimo,
+            limite,
         )
     candidatos = [
         Candidato(
-            seq=r["seq"], role=r["role"], preview=r["preview"],
-            dias=float(r["dias"]), relevance=r["relevance"],
+            seq=r["seq"],
+            role=r["role"],
+            preview=r["preview"],
+            dias=float(r["dias"]),
+            relevance=r["relevance"],
         )
         for r in rows
     ]
     logger.info(
         "[microglia] dry-run: %d candidatos a olvido (viejo>%dd, rel<%.2f, consolidado)",
-        len(candidatos), dias_minimo, relevance_max,
+        len(candidatos),
+        dias_minimo,
+        relevance_max,
     )
     return candidatos
 
@@ -96,17 +107,20 @@ MAX_OLVIDO_POR_RUN = 20  # tope duro: nunca olvidar más de N por corrida (anti-
 class ResultadoOlvido:
     """Resumen de una corrida de la Microglía."""
 
-    confirmado: bool          # False = dry-run (no borró); True = soft-delete real
-    candidatos: int           # cuántos cumplían las 3 condiciones
-    olvidados: int            # cuántos se soft-borraron (0 si dry-run)
-    seqs: list[int]           # los seq afectados/candidatos
+    confirmado: bool  # False = dry-run (no borró); True = soft-delete real
+    candidatos: int  # cuántos cumplían las 3 condiciones
+    olvidados: int  # cuántos se soft-borraron (0 si dry-run)
+    seqs: list[int]  # los seq afectados/candidatos
 
 
 async def olvidar(
-    pool: asyncpg.Pool, session_id: str, *,
+    pool: asyncpg.Pool,
+    session_id: str,
+    *,
     confirmar: bool = False,
     max_por_run: int = MAX_OLVIDO_POR_RUN,
-    dias_minimo: int = DIAS_MINIMO, relevance_max: float = RELEVANCE_MAXIMA,
+    dias_minimo: int = DIAS_MINIMO,
+    relevance_max: float = RELEVANCE_MAXIMA,
 ) -> ResultadoOlvido:
     """Olvida (SOFT-delete) los episodios candidatos. DOBLE CANDADO:
 
@@ -121,8 +135,11 @@ async def olvidar(
     Registra el evento en el audit chain.
     """
     candidatos = await evaluar_candidatos(
-        pool, session_id, dias_minimo=dias_minimo,
-        relevance_max=relevance_max, limite=max_por_run,
+        pool,
+        session_id,
+        dias_minimo=dias_minimo,
+        relevance_max=relevance_max,
+        limite=max_por_run,
     )
     seqs = [c.seq for c in candidatos]
 
@@ -131,8 +148,11 @@ async def olvidar(
         # trazabilidad: el dry-run también deja rastro en audit ("evalué N, no borré")
         try:
             from for3s_core import audit
+
             await audit.append(
-                pool, actor="microglia", action="microglia_forget_dryrun",
+                pool,
+                actor="microglia",
+                action="microglia_forget_dryrun",
                 detail={"session_id": session_id, "candidatos": len(seqs), "seqs": seqs[:100]},
             )
         except Exception as e:  # noqa: BLE001
@@ -149,7 +169,8 @@ async def olvidar(
             "UPDATE episodes_events SET deleted_at = now() "
             "WHERE session_id = $1 AND seq = ANY($2::int[]) "
             "  AND deleted_at IS NULL AND consolidated_to_kg = true",
-            session_id, seqs,
+            session_id,
+            seqs,
         )
     try:
         olvidados = int(result.split()[-1])
@@ -159,8 +180,10 @@ async def olvidar(
     # audit (trazabilidad) — NO toca audit_events directamente, usa el append oficial
     try:
         from for3s_core import audit
+
         await audit.append(
-            pool, actor="microglia",
+            pool,
+            actor="microglia",
             action="microglia_forget",
             detail={"session_id": session_id, "olvidados": olvidados, "seqs": seqs[:100]},
         )
@@ -181,7 +204,8 @@ async def recuperar(pool: asyncpg.Pool, session_id: str, seqs: list[int]) -> int
         result = await conn.execute(
             "UPDATE episodes_events SET deleted_at = NULL "
             "WHERE session_id = $1 AND seq = ANY($2::int[])",
-            session_id, seqs,
+            session_id,
+            seqs,
         )
     try:
         n = int(result.split()[-1])

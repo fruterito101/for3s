@@ -37,8 +37,8 @@ logger = logging.getLogger("for3s.governor")
 WORKSPACE_DEFAULT = "default"
 
 # ── Calibración v1 (muy conservadora, R6: "calibración muy conservadora v1") ──
-MAX_NEW_SKILLS_AUTO_PER_DAY = 3      # FRENO 1 — techo de auto-generación por día
-MAX_ACTIVE_SKILLS = 100             # FRENO 5 — techo de complejidad del ecosistema
+MAX_NEW_SKILLS_AUTO_PER_DAY = 3  # FRENO 1 — techo de auto-generación por día
+MAX_ACTIVE_SKILLS = 100  # FRENO 5 — techo de complejidad del ecosistema
 
 # Provenance (espejo de skills.py — el governor SOLO toca 'auto').
 PROV_USUARIO = "usuario"
@@ -55,48 +55,84 @@ ENV_AUTOGEN_OFF = "FOR3S_AUTOGEN_OFF"
 # rechace; lo que NO queremos es que la auto-generación (H12) cree algo peligroso.
 _PATRONES_PELIGROSOS: list[tuple[re.Pattern, str]] = [
     # — Comandos destructivos —
-    (re.compile(r"\brm\s+-[a-z]*r[a-z]*f|\brm\s+-[a-z]*f[a-z]*r", re.I),
-     "borrado recursivo forzado (rm -rf)"),
-    (re.compile(r"\b(mkfs|dd\s+if=|shred|wipefs)\b", re.I),
-     "formateo / destrucción de disco"),
-    (re.compile(r":\(\)\s*\{.*\}\s*;\s*:|fork\s*bomb", re.I | re.S),
-     "fork bomb"),
-    (re.compile(r"\bDROP\s+(TABLE|DATABASE|SCHEMA)\b|\bTRUNCATE\b", re.I),
-     "DROP/TRUNCATE de base de datos"),
-    (re.compile(r"\b>\s*/dev/sd[a-z]|\bchmod\s+-R\s+777\s+/", re.I),
-     "sobrescritura de dispositivo / permisos peligrosos en raíz"),
+    (
+        re.compile(r"\brm\s+-[a-z]*r[a-z]*f|\brm\s+-[a-z]*f[a-z]*r", re.I),
+        "borrado recursivo forzado (rm -rf)",
+    ),
+    (re.compile(r"\b(mkfs|dd\s+if=|shred|wipefs)\b", re.I), "formateo / destrucción de disco"),
+    (re.compile(r":\(\)\s*\{.*\}\s*;\s*:|fork\s*bomb", re.I | re.S), "fork bomb"),
+    (
+        re.compile(r"\bDROP\s+(TABLE|DATABASE|SCHEMA)\b|\bTRUNCATE\b", re.I),
+        "DROP/TRUNCATE de base de datos",
+    ),
+    (
+        re.compile(r"\b>\s*/dev/sd[a-z]|\bchmod\s+-R\s+777\s+/", re.I),
+        "sobrescritura de dispositivo / permisos peligrosos en raíz",
+    ),
     # — Descarga + ejecución (la vía clásica de malware) —
-    (re.compile(r"\b(curl|wget|fetch)\b[^\n|]*\|\s*(sudo\s+)?(ba)?sh\b", re.I),
-     "descarga directa ejecutada en shell (curl|sh)"),
-    (re.compile(r"\b(eval|exec)\s*\(\s*(base64|requests\.get|urllib|fetch)", re.I),
-     "ejecución de código descargado dinámicamente"),
+    (
+        re.compile(r"\b(curl|wget|fetch)\b[^\n|]*\|\s*(sudo\s+)?(ba)?sh\b", re.I),
+        "descarga directa ejecutada en shell (curl|sh)",
+    ),
+    (
+        re.compile(r"\b(eval|exec)\s*\(\s*(base64|requests\.get|urllib|fetch)", re.I),
+        "ejecución de código descargado dinámicamente",
+    ),
     # — Exfiltración de secretos (CRÍTICO para For3s: KEK nunca sale) —
-    (re.compile(r"\b(KEK|master[_-]?key|private[_-]?key|secret[_-]?store)\b", re.I),
-     "acceso a material criptográfico / KEK"),
-    (re.compile(r"\b(\.env|id_rsa|\.ssh/|credentials|secrets?\.(json|ya?ml|txt))\b", re.I),
-     "lectura de archivos de credenciales"),
-    (re.compile(r"\b(ANTHROPIC_TOKEN|TELEGRAM_BOT_TOKEN|DATABASE_URL|sk-ant-)", re.I),
-     "exposición de tokens / credenciales de For3s"),
-    (re.compile(r"\b(os\.environ|getenv|printenv|env)\b[^\n]{0,40}\|[^\n]*(curl|nc|wget)",
-                re.I),
-     "exfiltración de variables de entorno por red"),
+    (
+        re.compile(r"\b(KEK|master[_-]?key|private[_-]?key|secret[_-]?store)\b", re.I),
+        "acceso a material criptográfico / KEK",
+    ),
+    (
+        re.compile(r"\b(\.env|id_rsa|\.ssh/|credentials|secrets?\.(json|ya?ml|txt))\b", re.I),
+        "lectura de archivos de credenciales",
+    ),
+    (
+        re.compile(r"\b(ANTHROPIC_TOKEN|TELEGRAM_BOT_TOKEN|DATABASE_URL|sk-ant-)", re.I),
+        "exposición de tokens / credenciales de For3s",
+    ),
+    (
+        re.compile(r"\b(os\.environ|getenv|printenv|env)\b[^\n]{0,40}\|[^\n]*(curl|nc|wget)", re.I),
+        "exfiltración de variables de entorno por red",
+    ),
     # — Persistencia / instalación silenciosa —
-    (re.compile(r"\b(crontab|systemctl\s+enable|/etc/cron|@reboot|launchctl|"
-                r"\.bashrc|\.profile|authorized_keys)\b", re.I),
-     "intento de persistencia (cron / autostart / bashrc)"),
-    (re.compile(r"\b(nc|netcat|ncat)\b[^\n]*-[a-z]*e|/dev/tcp/", re.I),
-     "shell reversa / bind shell"),
+    (
+        re.compile(
+            r"\b(crontab|systemctl\s+enable|/etc/cron|@reboot|launchctl|"
+            r"\.bashrc|\.profile|authorized_keys)\b",
+            re.I,
+        ),
+        "intento de persistencia (cron / autostart / bashrc)",
+    ),
+    (
+        re.compile(r"\b(nc|netcat|ncat)\b[^\n]*-[a-z]*e|/dev/tcp/", re.I),
+        "shell reversa / bind shell",
+    ),
     # — Prompt-injection (la skill intenta secuestrar al agente) —
-    (re.compile(r"ignora(r)?\s+(todas?\s+)?(las\s+)?(instrucciones|reglas)\s+"
-                r"(anteriores|previas|del\s+sistema)", re.I),
-     "prompt-injection (anular instrucciones del sistema)"),
-    (re.compile(r"\b(ignore\s+(all\s+)?(previous|prior)\s+instructions|"
-                r"disregard\s+(the\s+)?system\s+prompt|you\s+are\s+now\s+(a\s+)?DAN)\b",
-                re.I),
-     "prompt-injection (en inglés)"),
-    (re.compile(r"revela(r)?\s+(tu|el)\s+(system\s+prompt|prompt\s+del\s+sistema|"
-                r"instrucciones\s+(secretas|ocultas))", re.I),
-     "intento de extraer el system prompt"),
+    (
+        re.compile(
+            r"ignora(r)?\s+(todas?\s+)?(las\s+)?(instrucciones|reglas)\s+"
+            r"(anteriores|previas|del\s+sistema)",
+            re.I,
+        ),
+        "prompt-injection (anular instrucciones del sistema)",
+    ),
+    (
+        re.compile(
+            r"\b(ignore\s+(all\s+)?(previous|prior)\s+instructions|"
+            r"disregard\s+(the\s+)?system\s+prompt|you\s+are\s+now\s+(a\s+)?DAN)\b",
+            re.I,
+        ),
+        "prompt-injection (en inglés)",
+    ),
+    (
+        re.compile(
+            r"revela(r)?\s+(tu|el)\s+(system\s+prompt|prompt\s+del\s+sistema|"
+            r"instrucciones\s+(secretas|ocultas))",
+            re.I,
+        ),
+        "intento de extraer el system prompt",
+    ),
 ]
 
 
@@ -105,8 +141,8 @@ class Veredicto:
     """Resultado de una verificación del governor."""
 
     permitido: bool
-    freno: str = ""          # qué freno decidió (scanner|generacion|duplicado|activas|killswitch)
-    motivo: str = ""         # explicación legible (para el dueño / auditoría)
+    freno: str = ""  # qué freno decidió (scanner|generacion|duplicado|activas|killswitch)
+    motivo: str = ""  # explicación legible (para el dueño / auditoría)
     detalle: list[str] = field(default_factory=list)  # hallazgos del scanner
 
     def __bool__(self) -> bool:  # `if veredicto:` == permitido
@@ -129,14 +165,19 @@ def escanear(contenido: str, *, nombre: str = "", descripcion: str = "") -> Vere
                 hallazgos.append(etiqueta)
         if hallazgos:
             return Veredicto(
-                permitido=False, freno="scanner",
+                permitido=False,
+                freno="scanner",
                 motivo="El scanner de seguridad detectó patrón(es) peligroso(s).",
-                detalle=hallazgos)
+                detalle=hallazgos,
+            )
         return Veredicto(permitido=True, freno="scanner", motivo="sin patrones peligrosos")
     except Exception:  # noqa: BLE001 — fail-closed: ante duda, bloquea
         logger.warning("scanner falló — bloqueo por seguridad (fail-closed)", exc_info=True)
-        return Veredicto(permitido=False, freno="scanner",
-                         motivo="el scanner no pudo verificar (bloqueo por seguridad)")
+        return Veredicto(
+            permitido=False,
+            freno="scanner",
+            motivo="el scanner no pudo verificar (bloqueo por seguridad)",
+        )
 
 
 @dataclass(frozen=True)
@@ -148,7 +189,7 @@ class EcosystemHealth:
     active_skills: int
     new_skills_auto_today: int
     bloqueos_today: int
-    veredicto: str          # HEALTHY | THROTTLED | FROZEN
+    veredicto: str  # HEALTHY | THROTTLED | FROZEN
 
 
 class SkillEcosystemGovernor:
@@ -173,7 +214,8 @@ class SkillEcosystemGovernor:
         try:
             async with self._pool.acquire() as con:
                 v = await con.fetchval(
-                    "SELECT autogen_on FROM governor_estado WHERE workspace=$1", self._ws)
+                    "SELECT autogen_on FROM governor_estado WHERE workspace=$1", self._ws
+                )
             return bool(v)
         except Exception:  # noqa: BLE001 — fail-closed: si no sé, está APAGADA
             logger.warning("no pude leer kill switch — asumo APAGADA", exc_info=True)
@@ -187,24 +229,32 @@ class SkillEcosystemGovernor:
                 " cambiado_at, motivo) VALUES ($1,$2,$3,now(),$4) "
                 "ON CONFLICT (workspace) DO UPDATE SET autogen_on=$2, cambiado_por=$3, "
                 " cambiado_at=now(), motivo=$4",
-                self._ws, on, por, (motivo or "")[:200])
+                self._ws,
+                on,
+                por,
+                (motivo or "")[:200],
+            )
         logger.info("[governor] kill switch autogen_on=%s por=%s", on, por)
 
     # ───────────── FRENO 1: generación/día ─────────────
     async def can_generate(self) -> Veredicto:
         """¿Se puede auto-generar otra skill HOY? (techo diario + kill switch)."""
         if not await self.autogen_permitida():
-            return Veredicto(False, "killswitch",
-                             "La auto-generación está APAGADA (kill switch).")
+            return Veredicto(False, "killswitch", "La auto-generación está APAGADA (kill switch).")
         try:
             async with self._pool.acquire() as con:
                 n = await con.fetchval(
                     "SELECT count(*) FROM skills WHERE provenance=$1 "
-                    "AND creada_at >= date_trunc('day', now())", PROV_AUTO)
+                    "AND creada_at >= date_trunc('day', now())",
+                    PROV_AUTO,
+                )
             if n >= MAX_NEW_SKILLS_AUTO_PER_DAY:
-                return Veredicto(False, "generacion",
-                                 f"Techo diario de auto-generación alcanzado "
-                                 f"({n}/{MAX_NEW_SKILLS_AUTO_PER_DAY}). Se difiere a mañana.")
+                return Veredicto(
+                    False,
+                    "generacion",
+                    f"Techo diario de auto-generación alcanzado "
+                    f"({n}/{MAX_NEW_SKILLS_AUTO_PER_DAY}). Se difiere a mañana.",
+                )
             return Veredicto(True, "generacion", f"{n}/{MAX_NEW_SKILLS_AUTO_PER_DAY} hoy")
         except Exception:  # noqa: BLE001 — fail-closed
             return Veredicto(False, "generacion", "no pude verificar el techo diario")
@@ -216,16 +266,22 @@ class SkillEcosystemGovernor:
         La versión semántica (descripción casi-idéntica vía pgvector) llega con H12,
         cuando haya embeddings de skills. Hoy: exact-match, conservador."""
         from for3s_core.skills import normalizar_nombre
+
         slug = normalizar_nombre(nombre)
         try:
             async with self._pool.acquire() as con:
                 existe = await con.fetchval(
-                    "SELECT 1 FROM skills WHERE categoria=$1 AND nombre=$2 "
-                    "AND lifecycle='active'", categoria, slug)
+                    "SELECT 1 FROM skills WHERE categoria=$1 AND nombre=$2 AND lifecycle='active'",
+                    categoria,
+                    slug,
+                )
             if existe:
-                return Veredicto(False, "duplicado",
-                                 f"Ya existe una skill activa '{categoria}/{slug}'. "
-                                 f"Para cambiarla, edítala (no dupliques).")
+                return Veredicto(
+                    False,
+                    "duplicado",
+                    f"Ya existe una skill activa '{categoria}/{slug}'. "
+                    f"Para cambiarla, edítala (no dupliques).",
+                )
             return Veredicto(True, "duplicado", "sin colisión")
         except Exception:  # noqa: BLE001 — fail-closed
             return Veredicto(False, "duplicado", "no pude verificar duplicados")
@@ -235,12 +291,14 @@ class SkillEcosystemGovernor:
         """¿Cabe una skill más sin pasar el techo de complejidad del ecosistema?"""
         try:
             async with self._pool.acquire() as con:
-                n = await con.fetchval(
-                    "SELECT count(*) FROM skills WHERE lifecycle='active'")
+                n = await con.fetchval("SELECT count(*) FROM skills WHERE lifecycle='active'")
             if n >= MAX_ACTIVE_SKILLS:
-                return Veredicto(False, "activas",
-                                 f"Techo de skills activas alcanzado "
-                                 f"({n}/{MAX_ACTIVE_SKILLS}). Cura/archiva antes de crear más.")
+                return Veredicto(
+                    False,
+                    "activas",
+                    f"Techo de skills activas alcanzado "
+                    f"({n}/{MAX_ACTIVE_SKILLS}). Cura/archiva antes de crear más.",
+                )
             return Veredicto(True, "activas", f"{n}/{MAX_ACTIVE_SKILLS} activas")
         except Exception:  # noqa: BLE001 — fail-closed
             return Veredicto(False, "activas", "no pude verificar el techo de activas")
@@ -265,10 +323,16 @@ class SkillEcosystemGovernor:
         return Veredicto(True, "eval", "hook H12 (requiere sandbox de skills)")
 
     # ───────────── GATE de entrada: TODA skill nueva pasa por aquí ─────────────
-    async def evaluar_skill_nueva(self, *, nombre: str, contenido: str,
-                                  categoria: str = "general", descripcion: str = "",
-                                  provenance: str = PROV_USUARIO,
-                                  creada_por: int | None = None) -> Veredicto:
+    async def evaluar_skill_nueva(
+        self,
+        *,
+        nombre: str,
+        contenido: str,
+        categoria: str = "general",
+        descripcion: str = "",
+        provenance: str = PROV_USUARIO,
+        creada_por: int | None = None,
+    ) -> Veredicto:
         """Puerta única que evalúa una skill ANTES de guardarla. Orden:
 
           1) SCANNER (siempre, usuario o auto) — el freno de daño. Si falla → BLOQUEA.
@@ -306,8 +370,9 @@ class SkillEcosystemGovernor:
 
         return Veredicto(True, "", "skill aprobada por el governor")
 
-    async def _registrar_bloqueo(self, v: Veredicto, nombre: str,
-                                 provenance: str, creada_por: int | None) -> None:
+    async def _registrar_bloqueo(
+        self, v: Veredicto, nombre: str, provenance: str, creada_por: int | None
+    ) -> None:
         """Deja constancia de un bloqueo (append-only, para auditoría + salud)."""
         try:
             motivo = v.motivo + ((" | " + "; ".join(v.detalle)) if v.detalle else "")
@@ -315,7 +380,13 @@ class SkillEcosystemGovernor:
                 await con.execute(
                     "INSERT INTO governor_bloqueos (workspace, freno, motivo, "
                     " skill_nombre, provenance, creada_por) VALUES ($1,$2,$3,$4,$5,$6)",
-                    self._ws, v.freno, motivo[:500], nombre[:64], provenance, creada_por)
+                    self._ws,
+                    v.freno,
+                    motivo[:500],
+                    nombre[:64],
+                    provenance,
+                    creada_por,
+                )
         except Exception:  # noqa: BLE001 — el registro nunca rompe la decisión
             logger.warning("no pude registrar bloqueo del governor", exc_info=True)
 
@@ -326,14 +397,24 @@ class SkillEcosystemGovernor:
         activas = nuevas = bloqueos = 0
         try:
             async with self._pool.acquire() as con:
-                activas = await con.fetchval(
-                    "SELECT count(*) FROM skills WHERE lifecycle='active'") or 0
-                nuevas = await con.fetchval(
-                    "SELECT count(*) FROM skills WHERE provenance=$1 "
-                    "AND creada_at >= date_trunc('day', now())", PROV_AUTO) or 0
-                bloqueos = await con.fetchval(
-                    "SELECT count(*) FROM governor_bloqueos "
-                    "WHERE creado_at >= date_trunc('day', now())") or 0
+                activas = (
+                    await con.fetchval("SELECT count(*) FROM skills WHERE lifecycle='active'") or 0
+                )
+                nuevas = (
+                    await con.fetchval(
+                        "SELECT count(*) FROM skills WHERE provenance=$1 "
+                        "AND creada_at >= date_trunc('day', now())",
+                        PROV_AUTO,
+                    )
+                    or 0
+                )
+                bloqueos = (
+                    await con.fetchval(
+                        "SELECT count(*) FROM governor_bloqueos "
+                        "WHERE creado_at >= date_trunc('day', now())"
+                    )
+                    or 0
+                )
         except Exception:  # noqa: BLE001
             logger.warning("health_report best-effort falló parcialmente", exc_info=True)
         if not autogen:

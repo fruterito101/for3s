@@ -42,6 +42,7 @@ def _get_gh_cache() -> GitHubCache:
         _gh_cache = GitHubCache()
     return _gh_cache
 
+
 # Cuántos turnos recientes se le pasan a Claude como contexto. NO todo el
 # historial (sesiones largas de 96k chars colgaban al bot). El resumen del
 # historial viejo es R3/H5.
@@ -61,9 +62,9 @@ _DIST_MIN_RECUERDO = 0.05
 # relevante llega casi completo (no se pierde info por corte); lo lejano queda corto
 # (no infla el contexto). Reemplaza el corte fijo de 300 con escalones. Conservador
 # con OAuth Tier 1 (máx 700/recuerdo + tope global del bloque).
-_MAX_CHARS_RECUERDO = 300          # base (recuerdos lejanos, 0.55–0.75) — compat
-_CHARS_RELEVANTE_ALTO = 700        # muy relevante (dist < 0.35): casi completo
-_CHARS_RELEVANTE_MEDIO = 450       # relevante medio (0.35–0.55)
+_MAX_CHARS_RECUERDO = 300  # base (recuerdos lejanos, 0.55–0.75) — compat
+_CHARS_RELEVANTE_ALTO = 700  # muy relevante (dist < 0.35): casi completo
+_CHARS_RELEVANTE_MEDIO = 450  # relevante medio (0.35–0.55)
 _DIST_ALTA_RELEVANCIA = 0.35
 _DIST_MEDIA_RELEVANCIA = 0.55
 # Tope GLOBAL del bloque de recuerdos (anti-bloat real): aunque varios relevantes
@@ -80,15 +81,25 @@ def _chars_por_relevancia(dist: float) -> int:
         return _CHARS_RELEVANTE_MEDIO
     return _MAX_CHARS_RECUERDO
 
+
 # Respuestas-META del bot que NO son información real, solo ruido conversacional
 # ("ya preguntaste", "no tengo registro", "no recibí contexto"…). Si una respuesta
 # del assistant EMPIEZA con algo así, NO debe inyectarse como "memoria" — recuperarla
 # crea un bucle de auto-contaminación (2026-06-22: causa del fallo intermitente
 # de "¿qué repos analizamos?"). Se comparan en minúsculas contra el inicio del texto.
 _PREFIJOS_META_RUIDO = (
-    "ya pregunt", "eso ya lo", "como ya te", "como te dije", "como te conté",
-    "no tengo registro", "no tengo en este", "no, de eso no", "honestamente, en esta",
-    "no recibí contexto", "honestamente no", "siendo honesto contigo, en esta",
+    "ya pregunt",
+    "eso ya lo",
+    "como ya te",
+    "como te dije",
+    "como te conté",
+    "no tengo registro",
+    "no tengo en este",
+    "no, de eso no",
+    "honestamente, en esta",
+    "no recibí contexto",
+    "honestamente no",
+    "siendo honesto contigo, en esta",
 )
 
 
@@ -109,8 +120,7 @@ def _fecha_recuerdo(created_at) -> str:
             rel = "ayer"
         else:
             rel = f"hace {dias} días"
-        meses = ["ene", "feb", "mar", "abr", "may", "jun",
-                 "jul", "ago", "sep", "oct", "nov", "dic"]
+        meses = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"]
         return f"{dt.day} {meses[dt.month - 1]} {dt.year}, {rel}"
     except (AttributeError, TypeError, ValueError):
         return ""
@@ -126,15 +136,13 @@ def _fecha_hora_turno(created_at) -> str:
         dt = created_at if created_at.tzinfo else created_at.replace(tzinfo=UTC)
         dias = (ahora - dt).days
         rel = "hoy" if dias <= 0 else ("ayer" if dias == 1 else f"hace {dias}d")
-        meses = ["ene", "feb", "mar", "abr", "may", "jun",
-                 "jul", "ago", "sep", "oct", "nov", "dic"]
+        meses = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"]
         return f"{dt.day} {meses[dt.month - 1]} {dt.hour:02d}:{dt.minute:02d} ({rel})"
     except (AttributeError, TypeError, ValueError):
         return ""
 
 
-def _formatear_linea_tiempo(history: list, *, max_turnos: int = 8,
-                            max_chars: int = 90) -> str:
+def _formatear_linea_tiempo(history: list, *, max_turnos: int = 8, max_chars: int = 90) -> str:
     """D-1 (Bloque 1, memoria híbrida): bloque de CONTEXTO que mapea CUÁNDO y QUIÉN
     dijo cada turno reciente, en orden cronológico. NO contamina los mensajes que
     van a Claude (esos quedan limpios role/content); esto es una referencia temporal
@@ -157,10 +165,12 @@ def _formatear_linea_tiempo(history: list, *, max_turnos: int = 8,
             lineas.append(f"• [{cuando}] {quien}: {texto}")
         if not lineas:
             return ""
-        return ("LÍNEA DE TIEMPO DE ESTA CONVERSACIÓN (lo más reciente abajo — úsala "
-                "para saber QUÉ fue lo ÚLTIMO y CUÁNDO; si te preguntan '¿en qué "
-                "quedamos?' guíate por el turno más reciente, no por lo más "
-                "parecido):\n" + "\n".join(lineas))
+        return (
+            "LÍNEA DE TIEMPO DE ESTA CONVERSACIÓN (lo más reciente abajo — úsala "
+            "para saber QUÉ fue lo ÚLTIMO y CUÁNDO; si te preguntan '¿en qué "
+            "quedamos?' guíate por el turno más reciente, no por lo más "
+            "parecido):\n" + "\n".join(lineas)
+        )
     except Exception:  # noqa: BLE001 — la línea de tiempo nunca rompe el turno
         return ""
 
@@ -170,17 +180,18 @@ def _formatear_recuerdos(recuerdos: list) -> str:
     Claude. Filtra ruido: (1) recuerdos demasiado lejanos (dist > MAX), (2) la
     query a sí misma / duplicados exactos (dist < MIN), (3) casi-idénticos entre
     sí (dedup). Acorta cada uno. 2026-06-19: afinado tras turno conservador."""
+
     # 1) filtro de relevancia: ni muy lejano ni la propia pregunta repetida.
     #    1b) descartar respuestas-META del bot (ruido conversacional, no info real)
     #    → corta el bucle de auto-contaminación al repetir una pregunta (2026-06-22).
     def _es_meta(r) -> bool:
-        return (
-            r.role == "assistant"
-            and (r.content or "").strip().lower().startswith(_PREFIJOS_META_RUIDO)
+        return r.role == "assistant" and (r.content or "").strip().lower().startswith(
+            _PREFIJOS_META_RUIDO
         )
 
     utiles = [
-        r for r in recuerdos
+        r
+        for r in recuerdos
         if _DIST_MIN_RECUERDO <= r.distancia <= _DIST_MAX_RECUERDO and not _es_meta(r)
     ]
     # 2) dedup: si dos recuerdos tienen el mismo texto (normalizado), dejar uno
@@ -196,10 +207,12 @@ def _formatear_recuerdos(recuerdos: list) -> str:
     # 3) texto que INVITA a usar los recuerdos como evidencia real (no tímido):
     # antes decía "úsalos solo si aplican" → demasiado conservador, el bot ignoraba
     # lo que sabía. Ahora afirma que SÍ son cosas que pasaron de verdad.
-    lineas = ["CONTEXTO DE TU MEMORIA — esto SÍ se habló antes con este usuario "
-              "(recuperado por significado de conversaciones pasadas). Tenlo en "
-              "cuenta para responder; si la pregunta es sobre lo que han hablado, "
-              "estos son los datos reales:"]
+    lineas = [
+        "CONTEXTO DE TU MEMORIA — esto SÍ se habló antes con este usuario "
+        "(recuperado por significado de conversaciones pasadas). Tenlo en "
+        "cuenta para responder; si la pregunta es sobre lo que han hablado, "
+        "estos son los datos reales:"
+    ]
     # AI6 TIERED: ordenar por relevancia (dist asc) para que, si se llega al tope
     # global del bloque, lo MÁS relevante entre primero. Luego cada recuerdo se
     # corta según su relevancia (_chars_por_relevancia).
@@ -222,9 +235,25 @@ def _formatear_recuerdos(recuerdos: list) -> str:
 # H6 Pieza-chat: palabras que indican una pregunta PANORÁMICA sobre lo trabajado
 # (cuándo vale la pena inyectar el resumen de conceptos del grafo, no en cada turno).
 _PALABRAS_PANORAMA = (
-    "hemos", "trabajado", "enfocado", "revisado", "hablado", "temas", "resumen",
-    "resúme", "resume", "en qué", "en que", "de qué", "de que", "qué hemos",
-    "que hemos", "historial", "recuerdas", "acuerdas", "proyectos",
+    "hemos",
+    "trabajado",
+    "enfocado",
+    "revisado",
+    "hablado",
+    "temas",
+    "resumen",
+    "resúme",
+    "resume",
+    "en qué",
+    "en que",
+    "de qué",
+    "de que",
+    "qué hemos",
+    "que hemos",
+    "historial",
+    "recuerdas",
+    "acuerdas",
+    "proyectos",
 )
 
 
@@ -238,11 +267,27 @@ def _es_pregunta_panorama(message: str) -> bool:
 # AI5 — version-self-awareness: detector de pregunta sobre la VERSIÓN/cambios del
 # agente (→ inyectar version.resumen() para que responda con datos reales, no invente).
 _PALABRAS_VERSION = (
-    "qué versión", "que version", "qué version", "que versión", "version eres",
-    "versión eres", "cuándo te actualiz", "cuando te actualiz", "qué hay nuevo",
-    "que hay nuevo", "qué hay de nuevo", "que tienes nuevo", "qué cambió",
-    "que cambio", "qué hitos", "que hitos", "cuál es tu versión", "cual es tu version",
-    "qué actualizaciones", "que actualizaciones", "novedades",
+    "qué versión",
+    "que version",
+    "qué version",
+    "que versión",
+    "version eres",
+    "versión eres",
+    "cuándo te actualiz",
+    "cuando te actualiz",
+    "qué hay nuevo",
+    "que hay nuevo",
+    "qué hay de nuevo",
+    "que tienes nuevo",
+    "qué cambió",
+    "que cambio",
+    "qué hitos",
+    "que hitos",
+    "cuál es tu versión",
+    "cual es tu version",
+    "qué actualizaciones",
+    "que actualizaciones",
+    "novedades",
 )
 
 
@@ -259,17 +304,31 @@ def _es_pregunta_version(message: str) -> bool:
 # listar/recordar, para no dispararse en cualquier mensaje que diga "repo".
 _PALABRAS_REPOS = ("repo", "repositorio")
 _PALABRAS_LISTAR = (
-    "enlista", "enlístame", "lista", "listame", "lístame", "cuáles", "cuales",
-    "qué repos", "que repos", "analizad", "analizamos", "revisad", "revisamos",
-    "pasado", "hemos", "todos los", "recuerdas", "vimos",
+    "enlista",
+    "enlístame",
+    "lista",
+    "listame",
+    "lístame",
+    "cuáles",
+    "cuales",
+    "qué repos",
+    "que repos",
+    "analizad",
+    "analizamos",
+    "revisad",
+    "revisamos",
+    "pasado",
+    "hemos",
+    "todos los",
+    "recuerdas",
+    "vimos",
 )
 
 
 def _es_pregunta_repos(message: str) -> bool:
     """True si preguntan por la lista de repos analizados (→ inyectar gh_resources)."""
     m = (message or "").lower()
-    return (any(p in m for p in _PALABRAS_REPOS)
-            and any(p in m for p in _PALABRAS_LISTAR))
+    return any(p in m for p in _PALABRAS_REPOS) and any(p in m for p in _PALABRAS_LISTAR)
 
 
 # D-2 (Bloque 1 memoria híbrida): frases de RETOMAR — el usuario quiere saber qué
@@ -278,23 +337,38 @@ def _es_pregunta_repos(message: str) -> bool:
 # intermedias ("en que NOS quedamos", "donde lo dejamos AYER", "en que punto
 # quedamos") — esto cubre las variantes naturales sin caer en falsos positivos.
 _FRASES_RETOMAR = (
-    "que estabamos haciendo", "que estabamos viendo", "en que ibamos",
-    "que hicimos", "que habiamos hecho", "lo ultimo que", "ultima vez que",
-    "retomemos", "retomamos", "continuemos donde", "seguimos donde",
-    "recuerdame en que", "recapitula", "ponme al dia",
-    "que veniamos", "de que hablabamos", "de que estabamos hablando",
-    "donde ibamos", "resumeme lo que", "que llevamos",
+    "que estabamos haciendo",
+    "que estabamos viendo",
+    "en que ibamos",
+    "que hicimos",
+    "que habiamos hecho",
+    "lo ultimo que",
+    "ultima vez que",
+    "retomemos",
+    "retomamos",
+    "continuemos donde",
+    "seguimos donde",
+    "recuerdame en que",
+    "recapitula",
+    "ponme al dia",
+    "que veniamos",
+    "de que hablabamos",
+    "de que estabamos hablando",
+    "donde ibamos",
+    "resumeme lo que",
+    "que llevamos",
 )
 # patrones flexibles: en/donde [ ... ] quedamos|dejamos  (tolera 'nos', 'lo', etc.)
-_REGEX_RETOMAR = re.compile(
-    r"\b(en|do?nde)\b[\w\s]{0,18}\b(quedamos|dejamos|ibamos|veniamos)\b")
+_REGEX_RETOMAR = re.compile(r"\b(en|do?nde)\b[\w\s]{0,18}\b(quedamos|dejamos|ibamos|veniamos)\b")
 
 
 def _sin_acentos(s: str) -> str:
     """minúsculas sin acentos (para detectar frases escritas con/sin tilde)."""
     import unicodedata
-    return unicodedata.normalize("NFKD", (s or "").lower()).encode(
-        "ascii", "ignore").decode("ascii")
+
+    return (
+        unicodedata.normalize("NFKD", (s or "").lower()).encode("ascii", "ignore").decode("ascii")
+    )
 
 
 def _es_pregunta_retomar(message: str) -> bool:
@@ -306,8 +380,7 @@ def _es_pregunta_retomar(message: str) -> bool:
     return bool(_REGEX_RETOMAR.search(m)) or any(f in m for f in _FRASES_RETOMAR)
 
 
-def _formatear_ultimo(history: list, *, max_turnos: int = 4,
-                      max_chars: int = 400) -> str:
+def _formatear_ultimo(history: list, *, max_turnos: int = 4, max_chars: int = 400) -> str:
     """D-2: bloque 'LO ÚLTIMO QUE TRABAJARON' — los últimos turnos textuales del
     hilo, en orden cronológico, con fecha+hora y MÁS detalle que la línea de tiempo
     de D-1 (400 chars vs 90). Crudo de la BD (lo último REAL, no por semejanza).
@@ -315,8 +388,7 @@ def _formatear_ultimo(history: list, *, max_turnos: int = 4,
     try:
         # el último turno del history es la pregunta actual del usuario → fuera
         previos = history[:-1] if history else []
-        recientes = [t for t in previos[-max_turnos:]
-                     if getattr(t, "created_at", None)]
+        recientes = [t for t in previos[-max_turnos:] if getattr(t, "created_at", None)]
         if not recientes:
             return ""
         lineas = []
@@ -327,10 +399,11 @@ def _formatear_ultimo(history: list, *, max_turnos: int = 4,
             if len(texto) > max_chars:
                 texto = texto[:max_chars] + "…"
             lineas.append(f"• [{cuando}] {quien}: {texto}")
-        return ("LO ÚLTIMO QUE TRABAJARON EN ESTE HILO (en orden, lo más reciente "
-                "abajo — esto es exactamente dónde quedaron; responde el '¿en qué "
-                "quedamos?' a partir de ESTO, no de lo semánticamente parecido):\n"
-                + "\n".join(lineas))
+        return (
+            "LO ÚLTIMO QUE TRABAJARON EN ESTE HILO (en orden, lo más reciente "
+            "abajo — esto es exactamente dónde quedaron; responde el '¿en qué "
+            "quedamos?' a partir de ESTO, no de lo semánticamente parecido):\n" + "\n".join(lineas)
+        )
     except Exception:  # noqa: BLE001 — nunca rompe el turno
         return ""
 
@@ -340,15 +413,18 @@ def _formatear_conceptos(conceptos: list) -> str:
     vista PANORÁMICA de lo trabajado — complementa los recuerdos semánticos puntuales."""
     if not conceptos:
         return ""
-    lineas = ["RESUMEN DE TU MEMORIA CONSOLIDADA (conceptos que tu propio sistema "
-              "extrajo de noche de todo el historial — esto SÍ resume lo que han "
-              "trabajado juntos; úsalo si preguntan en qué se han enfocado):"]
+    lineas = [
+        "RESUMEN DE TU MEMORIA CONSOLIDADA (conceptos que tu propio sistema "
+        "extrajo de noche de todo el historial — esto SÍ resume lo que han "
+        "trabajado juntos; úsalo si preguntan en qué se han enfocado):"
+    ]
     for c in conceptos[:25]:
         label = (c.get("label") or "").strip()
         tipo = (c.get("tipo") or "").strip()
         if label:
             lineas.append(f"- {label}" + (f" ({tipo})" if tipo else ""))
     return "\n".join(lineas)
+
 
 # Detector LIGERO de "¿este mensaje huele a GitHub?" → solo entonces se le dan
 # las tools a Claude (corre el loop MCP). Ahorra rate-limit (el tool-use manda
@@ -370,7 +446,7 @@ _GH_HINT_RE = re.compile(
     r"|\bpull/\d+|\bissues?/\d+"
     r"|\bc[oó]digo\b|\barchivos?\b"
     r"|\b[a-z][\w.\-]{2,}/[\w.\-]{2,}\b"  # owner/repo (ej. owner/proyecto)
-    r"|\bgodinez[\w.\-]*\b"               # repos del proyecto (godinez-studio, godinez-ai)
+    r"|\bgodinez[\w.\-]*\b"  # repos del proyecto (godinez-studio, godinez-ai)
     r")",
     re.IGNORECASE,
 )
@@ -427,9 +503,11 @@ _URL_RE = re.compile(r"https?://[^\s]+", re.IGNORECASE)
 def _quitar_urls_no_github(text: str) -> str:
     """Reemplaza por espacio las URLs que NO son de github.com; deja las de
     github.com intactas. Así el detector no confunde un path web con owner/repo."""
+
     def _sub(m: re.Match) -> str:
         url = m.group(0)
         return url if "github.com" in url.lower() else " "
+
     return _URL_RE.sub(_sub, text)
 
 
@@ -487,8 +565,14 @@ _ORG_RE = re.compile(
     re.IGNORECASE,
 )
 _RESERVADOS_GH = (
-    "orgs", "settings", "marketplace", "features",
-    "about", "pulls", "issues", "notifications",
+    "orgs",
+    "settings",
+    "marketplace",
+    "features",
+    "about",
+    "pulls",
+    "issues",
+    "notifications",
 )
 
 
@@ -515,8 +599,14 @@ class Conversation:
     """Una conversación persistente atada a una sesión."""
 
     def __init__(
-        self, pool: asyncpg.Pool, agent: Agent, session_id: str, channel: str = "cli",
-        *, telegram_user_id: int | None = None, scope_user_id: int | None = None,
+        self,
+        pool: asyncpg.Pool,
+        agent: Agent,
+        session_id: str,
+        channel: str = "cli",
+        *,
+        telegram_user_id: int | None = None,
+        scope_user_id: int | None = None,
     ) -> None:
         self._pool = pool
         self._agent = agent
@@ -549,6 +639,7 @@ class Conversation:
         sus errores. Si no hay event loop (ej. contexto CLI sync), lo ignora."""
         try:
             import asyncio
+
             t = asyncio.create_task(
                 memory.embeddear_turno(self._pool, self._session_id, seq, content)
             )
@@ -558,7 +649,12 @@ class Conversation:
             pass  # sin event loop corriendo → se embeberá por backfill después
 
     async def _guardar_turno(
-        self, *, role: str, content: str, tokens_in: int = 0, tokens_out: int = 0,
+        self,
+        *,
+        role: str,
+        content: str,
+        tokens_in: int = 0,
+        tokens_out: int = 0,
         model: str | None = None,
     ) -> int:
         """Guarda un turno Y dispara su embedding en background (Pieza B, H5).
@@ -566,9 +662,15 @@ class Conversation:
         (send, send_with_tools, analizar_repo, continuar, listar_org) embeben sus
         turnos sin olvidar ninguno. Devuelve el seq (igual que record_turn)."""
         seq = await memory.record_turn(
-            self._pool, self._session_id, role=role, content=content,
-            tokens_in=tokens_in, tokens_out=tokens_out, model=model,
-            channel=self._channel, telegram_user_id=self._telegram_user_id,
+            self._pool,
+            self._session_id,
+            role=role,
+            content=content,
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
+            model=model,
+            channel=self._channel,
+            telegram_user_id=self._telegram_user_id,
         )
         self._embeber_bg(seq, content)
         return seq
@@ -577,8 +679,13 @@ class Conversation:
         return await memory.load_history(self._pool, self._session_id)
 
     async def send(
-        self, message: str, *, max_tokens: int = 1024, prompt: str | None = None,
-        contexto: str = "", adjuntos: list[dict] | None = None,
+        self,
+        message: str,
+        *,
+        max_tokens: int = 1024,
+        prompt: str | None = None,
+        contexto: str = "",
+        adjuntos: list[dict] | None = None,
     ) -> LLMResponse:
         """Procesa un turno.
 
@@ -604,6 +711,7 @@ class Conversation:
         if self._telegram_user_id is not None:
             try:
                 from for3s_core.perfil import PerfilStore, detectar_afirmacion
+
                 af = detectar_afirmacion(message)
                 if af:
                     ps = PerfilStore(self._pool)
@@ -648,8 +756,9 @@ class Conversation:
         # NO contamina `prior` (los mensajes a Claude quedan limpios). Defensivo.
         linea_tiempo = _formatear_linea_tiempo(history)
         if linea_tiempo:
-            contexto_final = (f"{contexto_final}\n\n{linea_tiempo}"
-                              if contexto_final else linea_tiempo)
+            contexto_final = (
+                f"{contexto_final}\n\n{linea_tiempo}" if contexto_final else linea_tiempo
+            )
 
         # 2a-ter) RETOMAR (D-2): si el usuario pregunta '¿en qué quedamos?' / 'qué
         # hicimos' / 'ponme al día', inyectar los últimos turnos CRUDOS con detalle
@@ -658,21 +767,28 @@ class Conversation:
         if _es_pregunta_retomar(message):
             ultimo = _formatear_ultimo(history)
             if ultimo:
-                contexto_final = (f"{contexto_final}\n\n{ultimo}"
-                                  if contexto_final else ultimo)
+                contexto_final = f"{contexto_final}\n\n{ultimo}" if contexto_final else ultimo
 
         # DOS búsquedas combinadas (2026-06-22): las preguntas del usuario se
         # parecen entre sí pero NO traen info; las RESPUESTAS del bot sí (repos,
         # hallazgos, datos). Buscar solo_asistente garantiza que entre la INFO real;
         # la búsqueda general aporta contexto adicional. Se combinan y deduplican.
         recuerdos_info = await memory.buscar_semantico(
-            self._pool, self._session_id, message,
-            top_n=3, excluir_ultimos=MAX_HISTORY_TURNS, solo_asistente=True,
+            self._pool,
+            self._session_id,
+            message,
+            top_n=3,
+            excluir_ultimos=MAX_HISTORY_TURNS,
+            solo_asistente=True,
             scope_user_id=self._scope_user_id,  # AI1: aislamiento por persona
         )
         recuerdos_gral = await memory.buscar_semantico(
-            self._pool, self._session_id, message,
-            top_n=3, excluir_ultimos=MAX_HISTORY_TURNS, solo_usuario=False,
+            self._pool,
+            self._session_id,
+            message,
+            top_n=3,
+            excluir_ultimos=MAX_HISTORY_TURNS,
+            solo_usuario=False,
             scope_user_id=self._scope_user_id,  # AI1: aislamiento por persona
         )
         # info (respuestas) primero — es lo más valioso; _formatear_recuerdos dedup
@@ -688,6 +804,7 @@ class Conversation:
         if _es_pregunta_panorama(message):
             try:
                 from for3s_core import kg
+
                 conceptos = await kg.conceptos(self._pool)
                 bloque_kg = _formatear_conceptos(conceptos)
                 if bloque_kg:
@@ -702,6 +819,7 @@ class Conversation:
         if _es_pregunta_version(message):
             try:
                 from for3s_core import version as _ver
+
                 try:
                     sv = await self._pool.fetchval("SELECT max(version) FROM schema_version")
                 except Exception:  # noqa: BLE001 — schema_version opcional
@@ -718,15 +836,14 @@ class Conversation:
         # En conversación activa NO se inyecta (los 12 turnos bastan). DEFENSIVO.
         try:
             from for3s_core import hilo_status
+
             st = await hilo_status.debe_inyectar(self._pool, self._session_id)
             if st:
                 bloque_st = (
                     "RETOMANDO ESTE HILO (resumen de en qué quedaron la última vez — "
                     "úsalo para dar continuidad natural, NO lo recites literal):\n" + st
                 )
-                contexto_final = (
-                    f"{contexto_final}\n\n{bloque_st}" if contexto_final else bloque_st
-                )
+                contexto_final = f"{contexto_final}\n\n{bloque_st}" if contexto_final else bloque_st
         except Exception:  # noqa: BLE001 — auto-retomar secundario, nunca rompe el turno
             pass
 
@@ -744,8 +861,7 @@ class Conversation:
                         "no inventes ni omitas):\n" + lista
                     )
                     contexto_final = (
-                        f"{contexto_final}\n\n{bloque_repos}"
-                        if contexto_final else bloque_repos
+                        f"{contexto_final}\n\n{bloque_repos}" if contexto_final else bloque_repos
                     )
             except Exception:  # noqa: BLE001 — lista de repos secundaria, no rompe
                 pass
@@ -756,6 +872,7 @@ class Conversation:
         if self._telegram_user_id is not None:
             try:
                 from for3s_core.perfil import PerfilStore
+
                 perfil_txt = await PerfilStore(self._pool).resumen(self._telegram_user_id)
                 if perfil_txt:
                     contexto_final = (
@@ -770,6 +887,7 @@ class Conversation:
         # se ignora. Registra el uso (para la curación nocturna de H11/H12).
         try:
             from for3s_core.skills import SkillStore
+
             ss = SkillStore(self._pool)
             relevantes = await ss.buscar_relevantes(message, limite=2)
             if relevantes:
@@ -795,9 +913,13 @@ class Conversation:
         # to_thread libera el event loop → el bot no se congela y el wait_for
         # del canal SÍ puede cortar (bug del PR #134).
         resp = await asyncio.to_thread(
-            functools.partial(self._agent.ask_with_history, prior,
-                              max_tokens=max_tokens, contexto=contexto_final,
-                              adjuntos=adjuntos)
+            functools.partial(
+                self._agent.ask_with_history,
+                prior,
+                max_tokens=max_tokens,
+                contexto=contexto_final,
+                adjuntos=adjuntos,
+            )
         )
 
         # 3b) H10-PLANEA metacognición ("sé cuándo no sé"): evalúo mi confianza en
@@ -806,28 +928,38 @@ class Conversation:
         # el audit (observabilidad). DEFENSIVO: nunca rompe el turno.
         try:
             from for3s_core import confidence as _cf
+
             score = await _cf.evaluar_respuesta_chat(
-                self._pool, respuesta=resp.text, session_id=self._session_id)
+                self._pool, respuesta=resp.text, session_id=self._session_id
+            )
             if score.nivel == _cf.ConfidenceLevel.CRITICAL:
                 # ¿el texto ya fue honesto sobre su duda? (la señal 1 lo mide)
                 ya_honesto = any(
-                    s.nombre == "llm_self_report" and s.valor < 0.65
-                    for s in score.señales)
+                    s.nombre == "llm_self_report" and s.valor < 0.65 for s in score.señales
+                )
                 if not ya_honesto:
-                    nota = ("\n\n_⚠️ Nota: no estoy del todo seguro de esto — "
-                            "verifícalo o dame más contexto si es importante._")
+                    nota = (
+                        "\n\n_⚠️ Nota: no estoy del todo seguro de esto — "
+                        "verifícalo o dame más contexto si es importante._"
+                    )
                     resp = resp.__class__(
-                        text=resp.text + nota, input_tokens=resp.input_tokens,
-                        output_tokens=resp.output_tokens, model=resp.model,
+                        text=resp.text + nota,
+                        input_tokens=resp.input_tokens,
+                        output_tokens=resp.output_tokens,
+                        model=resp.model,
                         usage_5h=getattr(resp, "usage_5h", None),
-                        usage_7d=getattr(resp, "usage_7d", None))
+                        usage_7d=getattr(resp, "usage_7d", None),
+                    )
         except Exception:  # noqa: BLE001 — metacognición secundaria, nunca rompe el turno
             pass
 
         # 4) guardar respuesta + audit (guarda + embebe en bg, Pieza B)
         await self._guardar_turno(
-            role="assistant", content=resp.text,
-            tokens_in=resp.input_tokens, tokens_out=resp.output_tokens, model=resp.model,
+            role="assistant",
+            content=resp.text,
+            tokens_in=resp.input_tokens,
+            tokens_out=resp.output_tokens,
+            model=resp.model,
         )
         await audit.append(
             self._pool,
@@ -889,8 +1021,13 @@ class Conversation:
         # workspace_id = la sesión (hoy "brian"); cuando llegue multi-tenant, ya
         # queda namespaced sin reescribir nada.
         result = await run_tool_loop(
-            provider, mcp, messages, system=system, max_tokens=max_tokens,
-            cache=_get_gh_cache(), workspace_id=self._session_id,
+            provider,
+            mcp,
+            messages,
+            system=system,
+            max_tokens=max_tokens,
+            cache=_get_gh_cache(),
+            workspace_id=self._session_id,
         )
         # Si el agente PROPUSO una write (comentar/crear), la dejamos para que el
         # canal muestre el botón de confirmación. NO se ejecutó nada todavía.
@@ -906,8 +1043,10 @@ class Conversation:
 
         # 5) guardar respuesta + audit (el reporte, no el contexto crudo)
         await self._guardar_turno(
-            role="assistant", content=result.text,
-            tokens_in=result.input_tokens, tokens_out=result.output_tokens,
+            role="assistant",
+            content=result.text,
+            tokens_in=result.input_tokens,
+            tokens_out=result.output_tokens,
             model=result.model,
         )
         await audit.append(
@@ -986,9 +1125,7 @@ class Conversation:
         if len(archivos) <= subbloques.UMBRAL_REPO_PEQUENO:
             resp = await self.send_with_tools(message, mcp, max_tokens=2048)
             if ficha_txt:
-                resp = dataclasses.replace(
-                    resp, text=f"{ficha_txt}\n\n---\n\n{resp.text}"
-                )
+                resp = dataclasses.replace(resp, text=f"{ficha_txt}\n\n---\n\n{resp.text}")
             return resp
 
         # 3) repo GRANDE → mapeo por sub-bloques (fila de 1, progreso editable)
@@ -1053,28 +1190,38 @@ class Conversation:
         await memory.ensure_session(self._pool, self._session_id, channel=self._channel)
         await self._guardar_turno(role="user", content=message)
         await audit.append(
-            self._pool, actor="user", action="message_in",
+            self._pool,
+            actor="user",
+            action="message_in",
             detail={"session": self._session_id, "modo": "continuar", "repo": repo},
         )
 
         reporte = await subbloques.analizar_repo_por_subbloques(
-            provider, mcp, self._pool,
-            session_id=self._session_id, owner=owner, repo=repo,
+            provider,
+            mcp,
+            self._pool,
+            session_id=self._session_id,
+            owner=owner,
+            repo=repo,
             pregunta=f"continúa el análisis de lo que faltó en {owner}/{repo}",
-            archivos=faltantes, system=system, oauth=oauth,
-            progreso=progreso, profundo=profundo, ya_ordenados=True,
+            archivos=faltantes,
+            system=system,
+            oauth=oauth,
+            progreso=progreso,
+            profundo=profundo,
+            ya_ordenados=True,
         )
 
         await self._guardar_turno(role="assistant", content=reporte)
         await audit.append(
-            self._pool, actor="for3s", action="message_out",
+            self._pool,
+            actor="for3s",
+            action="message_out",
             detail={"session": self._session_id, "modo": "continuar", "repo": repo},
         )
         return LLMResponse(text=reporte, input_tokens=0, output_tokens=0, model=provider._model)
 
-    async def listar_repos_org(
-        self, message: str, mcp: GitHubMCPClient, org: str
-    ) -> LLMResponse:
+    async def listar_repos_org(self, message: str, mcp: GitHubMCPClient, org: str) -> LLMResponse:
         """La URL apunta a una ORGANIZACIÓN (github.com/NOMBRE sin /repo).
 
         En vez de dejar que el flujo tool-use alucine un repo inexistente (causa
@@ -1100,8 +1247,10 @@ class Conversation:
                 {"query": f"org:{org}", "perPage": 30, "sort": "updated"},
             )
             data = _json.loads(raw)
-            items = data.get("items", []) if isinstance(data, dict) else (
-                data if isinstance(data, list) else []
+            items = (
+                data.get("items", [])
+                if isinstance(data, dict)
+                else (data if isinstance(data, list) else [])
             )
             for it in items:
                 nombre = it.get("name") if isinstance(it, dict) else None

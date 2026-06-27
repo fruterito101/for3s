@@ -36,11 +36,11 @@ SIGNAL_WEIGHTS = {
 
 
 class ConfidenceLevel(str, Enum):  # noqa: UP042 — str+Enum a propósito (serializa directo, fiel R6)
-    HIGH = "high"            # 0.90+
-    MED_HIGH = "med_high"    # 0.70-0.89
-    MEDIUM = "medium"        # 0.50-0.69
-    LOW = "low"              # 0.30-0.49
-    CRITICAL = "critical"    # <0.30
+    HIGH = "high"  # 0.90+
+    MED_HIGH = "med_high"  # 0.70-0.89
+    MEDIUM = "medium"  # 0.50-0.69
+    LOW = "low"  # 0.30-0.49
+    CRITICAL = "critical"  # <0.30
 
     @classmethod
     def from_value(cls, v: float) -> ConfidenceLevel:
@@ -60,14 +60,14 @@ class Signal:
     """Una señal de confianza: su valor (0-1), si tiene datos reales, y por qué."""
 
     nombre: str
-    valor: float           # 0..1
-    disponible: bool       # False = sin infra → NO entra en la agregación
+    valor: float  # 0..1
+    disponible: bool  # False = sin infra → NO entra en la agregación
     motivo: str = ""
 
 
 @dataclass(frozen=True)
 class ConfidenceScore:
-    valor: float                 # 0..1 agregado (solo señales disponibles)
+    valor: float  # 0..1 agregado (solo señales disponibles)
     nivel: ConfidenceLevel
     señales: list[Signal]
 
@@ -80,17 +80,40 @@ class ConfidenceScore:
 # ───────────────────────── señales con infra REAL ─────────────────────────
 # Frases que delatan que el PROPIO modelo no está seguro (señal 1, llm_self_report).
 _INSEGURIDAD = (
-    "no estoy seguro", "no estoy segura", "no tengo certeza", "creo que",
-    "probablemente", "podría ser", "podria ser", "tal vez", "quizá", "quiza",
-    "no sé", "no se ", "no lo sé", "no tengo información", "no tengo informacion",
-    "no me consta", "asumo que", "supongo que", "no recuerdo", "no estoy del todo",
-    "puede que", "habría que verificar", "habria que verificar", "no estoy convencido",
+    "no estoy seguro",
+    "no estoy segura",
+    "no tengo certeza",
+    "creo que",
+    "probablemente",
+    "podría ser",
+    "podria ser",
+    "tal vez",
+    "quizá",
+    "quiza",
+    "no sé",
+    "no se ",
+    "no lo sé",
+    "no tengo información",
+    "no tengo informacion",
+    "no me consta",
+    "asumo que",
+    "supongo que",
+    "no recuerdo",
+    "no estoy del todo",
+    "puede que",
+    "habría que verificar",
+    "habria que verificar",
+    "no estoy convencido",
 )
 # Frases de NEGACIÓN HONESTA fuerte (no es inseguridad mala — es buena, pero indica
 # que el tema cae fuera de lo conocido → confianza media-baja en "tener la respuesta").
 _SIN_DATO = (
-    "no tengo registro", "no aparece en mi memoria", "no hemos hablado",
-    "eso no lo trabajamos", "no encontré", "no encontre",
+    "no tengo registro",
+    "no aparece en mi memoria",
+    "no hemos hablado",
+    "eso no lo trabajamos",
+    "no encontré",
+    "no encontre",
 )
 
 
@@ -103,29 +126,41 @@ def signal_llm_self_report(respuesta: str) -> Signal:
     hits = sum(1 for f in _INSEGURIDAD if f in t)
     sin_dato = any(f in t for f in _SIN_DATO)
     if hits == 0 and not sin_dato:
-        valor = 0.92            # sin marcadores de duda → seguro
+        valor = 0.92  # sin marcadores de duda → seguro
     elif sin_dato and hits == 0:
-        valor = 0.6             # negación honesta clara (sabe que no sabe)
+        valor = 0.6  # negación honesta clara (sabe que no sabe)
     else:
         valor = max(0.2, 0.85 - 0.18 * hits)  # cada marcador baja la confianza
-    return Signal("llm_self_report", round(valor, 3), True,
-                  f"{hits} marcadores de duda" + (" + sin-dato" if sin_dato else ""))
+    return Signal(
+        "llm_self_report",
+        round(valor, 3),
+        True,
+        f"{hits} marcadores de duda" + (" + sin-dato" if sin_dato else ""),
+    )
 
 
 def signal_tool_success(tools_ok: bool | None, hubo_tools: bool) -> Signal:
     """Señal 2: ¿las tools del turno funcionaron? Solo disponible si hubo tools."""
     if not hubo_tools:
         return Signal("tool_success", 0.0, False, "no hubo tools en este turno")
-    return Signal("tool_success", 1.0 if tools_ok else 0.25, True,
-                  "tools ok" if tools_ok else "alguna tool falló")
+    return Signal(
+        "tool_success",
+        1.0 if tools_ok else 0.25,
+        True,
+        "tools ok" if tools_ok else "alguna tool falló",
+    )
 
 
 def signal_schema_valid(schema_ok: bool | None) -> Signal:
     """Señal 3: ¿la salida estructurada parseó bien? None = no aplicaba (chat libre)."""
     if schema_ok is None:
         return Signal("schema_valid", 0.0, False, "sin salida estructurada")
-    return Signal("schema_valid", 1.0 if schema_ok else 0.2, True,
-                  "schema válido" if schema_ok else "schema inválido")
+    return Signal(
+        "schema_valid",
+        1.0 if schema_ok else 0.2,
+        True,
+        "schema válido" if schema_ok else "schema inválido",
+    )
 
 
 def signal_historical(tasa_error_reciente: float | None) -> Signal:
@@ -134,8 +169,9 @@ def signal_historical(tasa_error_reciente: float | None) -> Signal:
     if tasa_error_reciente is None:
         return Signal("historical", 0.0, False, "sin histórico suficiente")
     valor = max(0.0, 1.0 - tasa_error_reciente)
-    return Signal("historical", round(valor, 3), True,
-                  f"tasa error reciente {tasa_error_reciente:.0%}")
+    return Signal(
+        "historical", round(valor, 3), True, f"tasa error reciente {tasa_error_reciente:.0%}"
+    )
 
 
 # ───────────────────────── señales SIN infra (neutras, honestas) ─────────────────────────
@@ -190,13 +226,21 @@ async def evaluar_respuesta_chat(pool, *, respuesta: str, session_id: str) -> Co
     tasa = None
     try:
         async with pool.acquire() as con:
-            total = await con.fetchval(
-                "SELECT count(*) FROM episodes_events WHERE role='assistant' "
-                "AND created_at >= now()-interval '24 hours' AND deleted_at IS NULL") or 0
-            vacios = await con.fetchval(
-                "SELECT count(*) FROM episodes_events WHERE role='assistant' "
-                "AND created_at >= now()-interval '24 hours' AND deleted_at IS NULL "
-                "AND (content IS NULL OR length(trim(content)) < 2)") or 0
+            total = (
+                await con.fetchval(
+                    "SELECT count(*) FROM episodes_events WHERE role='assistant' "
+                    "AND created_at >= now()-interval '24 hours' AND deleted_at IS NULL"
+                )
+                or 0
+            )
+            vacios = (
+                await con.fetchval(
+                    "SELECT count(*) FROM episodes_events WHERE role='assistant' "
+                    "AND created_at >= now()-interval '24 hours' AND deleted_at IS NULL "
+                    "AND (content IS NULL OR length(trim(content)) < 2)"
+                )
+                or 0
+            )
         if total >= 5:  # con poca señal no aporta
             tasa = vacios / total
     except Exception:  # noqa: BLE001
@@ -210,9 +254,13 @@ async def evaluar_respuesta_chat(pool, *, respuesta: str, session_id: str) -> Co
     # audit ligero (reusa la cadena) — defensivo
     try:
         from for3s_core import audit
-        await audit.append(pool, actor="for3s", action="confidence_calculated",
-                           detail={"session": session_id, "valor": score.valor,
-                                   "nivel": score.nivel.value})
+
+        await audit.append(
+            pool,
+            actor="for3s",
+            action="confidence_calculated",
+            detail={"session": session_id, "valor": score.valor, "nivel": score.nivel.value},
+        )
     except Exception:  # noqa: BLE001
         pass
     return score

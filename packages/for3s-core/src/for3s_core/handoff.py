@@ -21,8 +21,13 @@ logger = logging.getLogger("for3s.handoff")
 
 
 async def registrar_corrida(
-    pool, *, session_id: str, telegram_user_id: int | None, tarea: str,
-    equipo, informe: str,
+    pool,
+    *,
+    session_id: str,
+    telegram_user_id: int | None,
+    tarea: str,
+    equipo,
+    informe: str,
 ) -> int | None:
     """Persiste una corrida del equipo + el reporte de cada specialist.
 
@@ -44,24 +49,39 @@ async def registrar_corrida(
                     "(session_id, telegram_user_id, tarea, familia, n_specialists, "
                     " n_ok, segundos, tokens_in, tokens_out, informe) "
                     "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id",
-                    session_id, telegram_user_id, tarea, equipo.familia,
-                    len(reportes), equipo.n_ok, equipo.segundos_total,
-                    tin, tout, informe,
+                    session_id,
+                    telegram_user_id,
+                    tarea,
+                    equipo.familia,
+                    len(reportes),
+                    equipo.n_ok,
+                    equipo.segundos_total,
+                    tin,
+                    tout,
+                    informe,
                 )
                 for r in reportes:
                     await con.execute(
                         "INSERT INTO corrida_reportes "
                         "(corrida_id, specialist, ok, tokens_in, tokens_out, "
                         " segundos, texto) VALUES ($1,$2,$3,$4,$5,$6,$7)",
-                        corrida_id, r.nombre, r.ok, r.tokens_in, r.tokens_out,
-                        r.segundos, r.texto,
+                        corrida_id,
+                        r.nombre,
+                        r.ok,
+                        r.tokens_in,
+                        r.tokens_out,
+                        r.segundos,
+                        r.texto,
                     )
-        logger.info("[handoff] corrida=%s registrada (%d specialists, %d ok)",
-                    corrida_id, len(reportes), equipo.n_ok)
+        logger.info(
+            "[handoff] corrida=%s registrada (%d specialists, %d ok)",
+            corrida_id,
+            len(reportes),
+            equipo.n_ok,
+        )
         return corrida_id
     except Exception:  # noqa: BLE001 — el audit NUNCA tumba la entrega del informe
-        logger.warning("[handoff] no pude registrar la corrida (no crítico)",
-                       exc_info=True)
+        logger.warning("[handoff] no pude registrar la corrida (no crítico)", exc_info=True)
         return None
 
 
@@ -73,6 +93,7 @@ async def ultimas_corridas(pool, session_id: str, *, limite: int = 5) -> list[di
             "SELECT id, tarea, familia, n_ok, n_specialists, segundos, creado_at "
             "FROM corridas_equipo WHERE session_id = $1 "
             "ORDER BY creado_at DESC LIMIT $2",
-            session_id, limite,
+            session_id,
+            limite,
         )
     return [dict(r) for r in rows]

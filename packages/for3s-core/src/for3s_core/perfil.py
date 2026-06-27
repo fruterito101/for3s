@@ -23,10 +23,13 @@ _CAMPOS_CLAVE = ("nombre", "rol", "stack", "estilo", "zona")
 # "prefiero respuestas cortas"...). Captura explícita: el usuario lo DICE.
 _PATRONES_ROL = re.compile(
     r"\b(?:soy|trabajo (?:en|como|de)|me dedico a|mi rol es)\s+(?:el |la |un |una )?"
-    r"([a-záéíóúñ ]{3,40})", re.IGNORECASE)
+    r"([a-záéíóúñ ]{3,40})",
+    re.IGNORECASE,
+)
 _PATRONES_PREFERENCIA = re.compile(
     r"\b(?:prefiero|me gusta(?:n)?|odio|no me gusta(?:n)?|mejor)\s+([a-záéíóúñ ,]{3,60})",
-    re.IGNORECASE)
+    re.IGNORECASE,
+)
 
 
 def detectar_afirmacion(texto: str) -> dict | None:
@@ -41,11 +44,25 @@ def detectar_afirmacion(texto: str) -> dict | None:
         rol = m.group(1).strip().rstrip(".,").lower()
         # cortar en conectores: "backend y trabajo con X" → "backend" (quedarse con
         # el rol, no arrastrar el resto de la frase).
-        rol = re.split(r"\s+(?:y|pero|aunque|que|porque|con|en|para|al|de|,)\s+",
-                       rol)[0].strip()
+        rol = re.split(r"\s+(?:y|pero|aunque|que|porque|con|en|para|al|de|,)\s+", rol)[0].strip()
         # filtrar lo que NO es un rol real (adjetivos de personalidad, palabras vacías)
-        _NO_ROL = {"claro", "honesto", "directo", "nuevo", "el", "la", "yo", "muy",
-                   "bueno", "malo", "feliz", "rapido", "rápido", "amable", "serio"}
+        _NO_ROL = {
+            "claro",
+            "honesto",
+            "directo",
+            "nuevo",
+            "el",
+            "la",
+            "yo",
+            "muy",
+            "bueno",
+            "malo",
+            "feliz",
+            "rapido",
+            "rápido",
+            "amable",
+            "serio",
+        }
         primera = rol.split()[0] if rol.split() else ""
         if 1 <= len(rol.split()) <= 3 and primera not in _NO_ROL:
             return {"rol": rol[:40]}
@@ -68,20 +85,29 @@ class PerfilStore:
             async with self._pool.acquire() as con:
                 r = await con.fetchrow(
                     "SELECT nombre, rol, stack, estilo, zona, rasgos "
-                    "FROM perfil_usuario WHERE telegram_user_id = $1", user_id)
+                    "FROM perfil_usuario WHERE telegram_user_id = $1",
+                    user_id,
+                )
             if r is None:
                 return None
             rasgos = r["rasgos"]
             if isinstance(rasgos, str):
                 rasgos = json.loads(rasgos)
-            return {"nombre": r["nombre"], "rol": r["rol"], "stack": r["stack"],
-                    "estilo": r["estilo"], "zona": r["zona"], "rasgos": rasgos or []}
+            return {
+                "nombre": r["nombre"],
+                "rol": r["rol"],
+                "stack": r["stack"],
+                "estilo": r["estilo"],
+                "zona": r["zona"],
+                "rasgos": rasgos or [],
+            }
         except Exception:  # noqa: BLE001 — leer perfil nunca rompe el turno
             logger.warning("error leyendo perfil (ignoro)", exc_info=True)
             return None
 
-    async def set_campo(self, user_id: int, campo: str, valor: str,
-                        *, nombre: str | None = None) -> None:
+    async def set_campo(
+        self, user_id: int, campo: str, valor: str, *, nombre: str | None = None
+    ) -> None:
         """Fija un campo CLAVE del perfil (rol/stack/estilo/zona/nombre). Upsert."""
         if campo not in _CAMPOS_CLAVE:
             return
@@ -92,16 +118,21 @@ class PerfilStore:
                 "ON CONFLICT (telegram_user_id) DO UPDATE "
                 f"SET {campo} = $2, actualizado_at = now(), "
                 "    nombre = COALESCE(perfil_usuario.nombre, $3)",
-                user_id, valor, nombre)
+                user_id,
+                valor,
+                nombre,
+            )
         logger.info("[perfil] user=%s set %s", user_id, campo)
 
-    async def add_rasgo(self, user_id: int, rasgo: str, *, nombre: str | None = None,
-                        max_rasgos: int = 15) -> None:
+    async def add_rasgo(
+        self, user_id: int, rasgo: str, *, nombre: str | None = None, max_rasgos: int = 15
+    ) -> None:
         """Añade un rasgo libre (sin duplicar), tope max_rasgos (los más recientes)."""
         async with self._pool.acquire() as con:
             async with con.transaction():
                 cur = await con.fetchval(
-                    "SELECT rasgos FROM perfil_usuario WHERE telegram_user_id=$1", user_id)
+                    "SELECT rasgos FROM perfil_usuario WHERE telegram_user_id=$1", user_id
+                )
                 rasgos = (json.loads(cur) if isinstance(cur, str) else cur) or []
                 if rasgo in rasgos:
                     return
@@ -113,7 +144,10 @@ class PerfilStore:
                     "ON CONFLICT (telegram_user_id) DO UPDATE "
                     "SET rasgos = $2, actualizado_at = now(), "
                     "    nombre = COALESCE(perfil_usuario.nombre, $3)",
-                    user_id, json.dumps(rasgos), nombre)
+                    user_id,
+                    json.dumps(rasgos),
+                    nombre,
+                )
         logger.info("[perfil] user=%s +rasgo", user_id)
 
     async def resumen(self, user_id: int) -> str | None:
@@ -137,5 +171,7 @@ class PerfilStore:
             partes.append(r)
         if not partes:
             return None
-        return ("PERFIL DE ESTA PERSONA (con quien hablas — adapta tu respuesta a "
-                "quién es, sin recitarlo literal):\n- " + "\n- ".join(partes))
+        return (
+            "PERFIL DE ESTA PERSONA (con quien hablas — adapta tu respuesta a "
+            "quién es, sin recitarlo literal):\n- " + "\n- ".join(partes)
+        )

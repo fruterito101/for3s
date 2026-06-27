@@ -23,11 +23,11 @@ from __future__ import annotations
 import asyncpg
 
 # --- Parámetros de la fórmula (ajustables) ---------------------------------
-VIDA_MEDIA_DIAS = 90.0   # a los 90 días sin usar, el decay temporal llega a 0.5
-REFUERZO_POR_USO = 0.1   # +10% de relevancia por cada recuperación (tope abajo)
-REFUERZO_USO_TOPE = 5    # como máximo cuenta 5 usos (→ refuerzo máx +50%)
-PISO_RELEVANCIA = 0.15   # piso de seguridad v1: no bajar de aquí salvo muy viejos
-DIAS_MUY_VIEJO = 180.0   # umbral para permitir caer por debajo del piso
+VIDA_MEDIA_DIAS = 90.0  # a los 90 días sin usar, el decay temporal llega a 0.5
+REFUERZO_POR_USO = 0.1  # +10% de relevancia por cada recuperación (tope abajo)
+REFUERZO_USO_TOPE = 5  # como máximo cuenta 5 usos (→ refuerzo máx +50%)
+PISO_RELEVANCIA = 0.15  # piso de seguridad v1: no bajar de aquí salvo muy viejos
+DIAS_MUY_VIEJO = 180.0  # umbral para permitir caer por debajo del piso
 
 
 def calcular_relevance(
@@ -89,7 +89,8 @@ WHERE e.id = calc.id
 
 
 async def recalcular_relevance_lote(
-    pool: asyncpg.Pool, session_id: str,
+    pool: asyncpg.Pool,
+    session_id: str,
 ) -> int:
     """Recalcula `relevance` de todos los episodios VIVOS de la sesión (en frío).
 
@@ -99,8 +100,13 @@ async def recalcular_relevance_lote(
     """
     async with pool.acquire() as conn:
         result = await conn.execute(
-            _SQL_RECALCULAR, session_id, DIAS_MUY_VIEJO, PISO_RELEVANCIA, VIDA_MEDIA_DIAS,
-            REFUERZO_POR_USO, REFUERZO_USO_TOPE,
+            _SQL_RECALCULAR,
+            session_id,
+            DIAS_MUY_VIEJO,
+            PISO_RELEVANCIA,
+            VIDA_MEDIA_DIAS,
+            REFUERZO_POR_USO,
+            REFUERZO_USO_TOPE,
         )
     # result tipo "UPDATE N" → extraer N
     try:
