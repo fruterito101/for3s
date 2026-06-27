@@ -1,3 +1,4 @@
+# For3s OS — Copyright (c) 2026 Brian Jovany López Pérez. Licencia AGPL-3.0 (ver LICENSE).
 """For3s OS — GOVERNOR del ecosistema de skills (H11 "APRENDE — el FRENO").
 
 El governor es el CONTROL que debe existir ANTES del motor de auto-generación (H12).

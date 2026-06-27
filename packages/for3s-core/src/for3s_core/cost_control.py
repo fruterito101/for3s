@@ -1,3 +1,4 @@
+# For3s OS — Copyright (c) 2026 Brian Jovany López Pérez. Licencia AGPL-3.0 (ver LICENSE).
 """For3s OS — Cost Control multi-agente (H8 S8, R5 B3 §5.3.4). LAS 7 CAPAS COMPLETAS.
 
 El FRENO del equipo multi-agente: 5 agentes = 5× consumo → sin tope = runaway de

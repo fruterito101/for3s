@@ -1,3 +1,4 @@
+# For3s OS — Copyright (c) 2026 Brian Jovany López Pérez. Licencia AGPL-3.0 (ver LICENSE).
 """Conversor Markdown (de Claude) → HTML de Telegram.
 
 Telegram Bot API soporta parse_mode=HTML con un set ACOTADO de tags:

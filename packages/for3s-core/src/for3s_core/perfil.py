@@ -1,3 +1,4 @@
+# For3s OS — Copyright (c) 2026 Brian Jovany López Pérez. Licencia AGPL-3.0 (ver LICENSE).
 """For3s OS — PERFIL de usuario (P1 modelar al usuario, 2026-06-24).
 
 For3s recuerda QUÉ se habló; el perfil guarda QUIÉN es cada persona (rol, stack,

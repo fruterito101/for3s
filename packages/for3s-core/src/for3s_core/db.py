@@ -1,3 +1,4 @@
+# For3s OS — Copyright (c) 2026 Brian Jovany López Pérez. Licencia AGPL-3.0 (ver LICENSE).
 """Capa de base de datos de For3s OS (H2) — conexión async + migraciones.
 
 R2 lockeó asyncpg. Capa de datos con SQL directo (transparente, auditable;

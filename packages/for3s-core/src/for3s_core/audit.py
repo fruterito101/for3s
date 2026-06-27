@@ -1,3 +1,4 @@
+# For3s OS — Copyright (c) 2026 Brian Jovany López Pérez. Licencia AGPL-3.0 (ver LICENSE).
 """Audit chain inmutable de For3s OS (H2) — Grafo Maestro §6.4.
 
 Cada decisión deja una entrada encadenada criptográficamente: hash_self =

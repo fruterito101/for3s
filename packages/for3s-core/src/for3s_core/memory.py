@@ -1,3 +1,4 @@
+# For3s OS — Copyright (c) 2026 Brian Jovany López Pérez. Licencia AGPL-3.0 (ver LICENSE).
 """Memoria episódica de For3s OS (H2) — Nodo 2 Hipocampo (versión cruda).
 
 Event Sourcing: cada turno (user dice X, For3s responde Y) es un evento

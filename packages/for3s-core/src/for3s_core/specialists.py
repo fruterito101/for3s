@@ -1,3 +1,4 @@
+# For3s OS — Copyright (c) 2026 Brian Jovany López Pérez. Licencia AGPL-3.0 (ver LICENSE).
 """For3s OS — catálogo de SPECIALISTS para el equipo multi-agente (H8, 2026-06-23).
 
 H8 convierte a For3s de 1 agente a un EQUIPO hub-and-spoke: el Hub lanza N specialists

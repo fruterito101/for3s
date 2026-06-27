@@ -1,3 +1,4 @@
+# For3s OS — Copyright (c) 2026 Brian Jovany López Pérez. Licencia AGPL-3.0 (ver LICENSE).
 """Loop de tool-use de For3s OS (Paso 3 migración GitHub→MCP).
 
 El corazón del agente "con manos" estándar: deja que el MODELO decida qué tool

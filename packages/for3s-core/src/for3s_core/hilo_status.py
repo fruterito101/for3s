@@ -1,3 +1,4 @@
+# For3s OS — Copyright (c) 2026 Brian Jovany López Pérez. Licencia AGPL-3.0 (ver LICENSE).
 """For3s OS — STATUS por hilo (AI4 auto-retomar, 2026-06-23).
 
 Cada hilo (persona×tema, del #6/AI2) tiene un STATUS corto curado ("en qué

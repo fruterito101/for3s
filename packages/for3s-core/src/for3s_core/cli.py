@@ -1,3 +1,4 @@
+# For3s OS — Copyright (c) 2026 Brian Jovany López Pérez. Licencia AGPL-3.0 (ver LICENSE).
 """CLI de For3s OS — terminal con MEMORIA persistente (H2).
 
 H2: la conversación se guarda en Postgres y se recupera al reiniciar.

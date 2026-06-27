@@ -1,3 +1,4 @@
+# For3s OS — Copyright (c) 2026 Brian Jovany López Pérez. Licencia AGPL-3.0 (ver LICENSE).
 """For3s OS — DMN "SUEÑA" (H9, 2026-06-25): trabaja solo cuando está idle.
 
 El DMN (Default Mode Network, Nodo 6) es el "modo por defecto del cerebro": cuando

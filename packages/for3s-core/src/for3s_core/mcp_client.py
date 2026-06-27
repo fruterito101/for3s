@@ -1,3 +1,4 @@
+# For3s OS — Copyright (c) 2026 Brian Jovany López Pérez. Licencia AGPL-3.0 (ver LICENSE).
 """Cliente MCP de For3s OS — puente con el GitHub MCP server (Paso 3 migración).
 
 Gestiona la sesión con el GitHub MCP server oficial (contenedor Docker, stdio,

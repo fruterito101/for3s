@@ -1,3 +1,4 @@
+# For3s OS — Copyright (c) 2026 Brian Jovany López Pérez. Licencia AGPL-3.0 (ver LICENSE).
 """Gestor de concurrencia LLM de For3s OS — "el repartidor de carriles".
 
 Adelanto de R3 (Token Bucket + circuit breaker) + R5 (cost control). Resuelve

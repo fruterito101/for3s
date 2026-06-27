@@ -1,3 +1,4 @@
+# For3s OS — Copyright (c) 2026 Brian Jovany López Pérez. Licencia AGPL-3.0 (ver LICENSE).
 """KEK foundation de For3s OS (H4) — jerarquía de cifrado de secretos (R4 v1).
 
 Diseño (R4 B1, Grafo §6 capa 1):

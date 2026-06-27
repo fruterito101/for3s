@@ -1,3 +1,4 @@
+# For3s OS — Copyright (c) 2026 Brian Jovany López Pérez. Licencia AGPL-3.0 (ver LICENSE).
 """Agente de For3s OS — arma el prompt y llama al LLM.
 
 H1.4 prompt builder mínimo. En modo OAuth (suscripción) el system DEBE ser

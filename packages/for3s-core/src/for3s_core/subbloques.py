@@ -1,3 +1,4 @@
+# For3s OS — Copyright (c) 2026 Brian Jovany López Pérez. Licencia AGPL-3.0 (ver LICENSE).
 """Orquestador de sub-bloques por USO (Anexo R3 — control por uso, no por tiempo).
 
 Diseño aprobado. Doc: Mente/Cuerpo/Ronda_03_Anexo_Control_Por_Uso_Subbloques.md

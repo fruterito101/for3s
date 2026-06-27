@@ -1,3 +1,4 @@
+# For3s OS — Copyright (c) 2026 Brian Jovany López Pérez. Licencia AGPL-3.0 (ver LICENSE).
 """Capa LLM de For3s OS — el motor generativo (Nodo 3 PFC, versión H1).
 
 H1.2 LLMProvider (ABC) · H1.3 ClaudeProvider (dual OAuth/API key) ·

@@ -1,3 +1,4 @@
+# For3s OS — Copyright (c) 2026 Brian Jovany López Pérez. Licencia AGPL-3.0 (ver LICENSE).
 """Knowledge Graph de For3s OS (H5 sub-paso 7, 2026-06-19) — Nodo 1 KG.
 
 Capa LIMPIA sobre Apache AGE para registrar y navegar el conocimiento que For3s

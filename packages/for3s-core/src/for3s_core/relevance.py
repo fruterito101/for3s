@@ -1,3 +1,4 @@
+# For3s OS — Copyright (c) 2026 Brian Jovany López Pérez. Licencia AGPL-3.0 (ver LICENSE).
 """For3s OS — cálculo de relevancia y decay de memoria (H6 "SE CUIDA", Sub-paso 3).
 
 La Microglía (olvido) necesita saber qué episodios son POCO relevantes para poder

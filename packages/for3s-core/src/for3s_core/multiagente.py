@@ -1,3 +1,4 @@
+# For3s OS — Copyright (c) 2026 Brian Jovany López Pérez. Licencia AGPL-3.0 (ver LICENSE).
 """For3s OS — red multi-agente (H8 "EQUIPO"). Hogar del Hub, el message bus y el
 Synthesizer que coordinan el equipo de specialists.
 

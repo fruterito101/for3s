@@ -1,3 +1,4 @@
+# For3s OS — Copyright (c) 2026 Brian Jovany López Pérez. Licencia AGPL-3.0 (ver LICENSE).
 """For3s OS — TEMAS por persona (AI2, 2026-06-23).
 
 Un mismo chat de Telegram (una persona) puede tener VARIOS temas/hilos separados,

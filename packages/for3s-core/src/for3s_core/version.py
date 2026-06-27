@@ -1,3 +1,4 @@
+# For3s OS — Copyright (c) 2026 Brian Jovany López Pérez. Licencia AGPL-3.0 (ver LICENSE).
 """For3s OS — version-self-awareness (AI5, 2026-06-23). Cierra P4 + G4.
 
 Fuente ÚNICA de verdad de la versión del agente. For3s se construye por HITOS

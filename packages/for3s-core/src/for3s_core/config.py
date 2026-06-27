@@ -1,3 +1,4 @@
+# For3s OS — Copyright (c) 2026 Brian Jovany López Pérez. Licencia AGPL-3.0 (ver LICENSE).
 """Configuración de For3s OS — lee secrets de entorno/.env (nunca del repo).
 
 H1.1 — soporta los DOS modos de auth con Claude:

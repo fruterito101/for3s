@@ -1,3 +1,4 @@
+# For3s OS — Copyright (c) 2026 Brian Jovany López Pérez. Licencia AGPL-3.0 (ver LICENSE).
 """For3s OS — CONFIDENCE / metacognición (H10-PLANEA, 2026-06-26).
 
 "Sé cuándo NO sé": For3s evalúa su PROPIA confianza en una respuesta. Si es alta,

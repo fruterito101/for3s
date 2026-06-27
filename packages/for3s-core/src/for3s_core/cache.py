@@ -1,3 +1,4 @@
+# For3s OS — Copyright (c) 2026 Brian Jovany López Pérez. Licencia AGPL-3.0 (ver LICENSE).
 """Cache de lecturas de GitHub en Valkey (2026-06-18, diseño R4.2.1 §4).
 
 Cuando el agente LEE algo de GitHub (un README, un issue, una búsqueda), el

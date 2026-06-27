@@ -1,3 +1,4 @@
+# For3s OS — Copyright (c) 2026 Brian Jovany López Pérez. Licencia AGPL-3.0 (ver LICENSE).
 """For3s OS — Backup automático de la BD (H6 "SE CUIDA", Sub-paso 11).
 
 Backup 3-2-1 FOUNDATION (single-user, esta fase):

@@ -1,3 +1,4 @@
+# For3s OS — Copyright (c) 2026 Brian Jovany López Pérez. Licencia AGPL-3.0 (ver LICENSE).
 """For3s OS — CLS Consolidation (Nodo 10), motor de consolidación de memoria.
 
 CLS = Complementary Learning Systems: cómo el cerebro, durante el sueño, pasa lo

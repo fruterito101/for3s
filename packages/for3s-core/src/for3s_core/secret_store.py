@@ -1,3 +1,4 @@
+# For3s OS — Copyright (c) 2026 Brian Jovany López Pérez. Licencia AGPL-3.0 (ver LICENSE).
 """Almacén de secretos cifrados de For3s OS (H4) — une KEK (crypto) + BD.
 
 API: set_secret / get_secret por (workspace, nombre). El plaintext solo

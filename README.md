@@ -51,4 +51,11 @@ Borra los contenedores, los datos y la configuración local. Deja la máquina co
 
 ## Licencia
 
-(por definir)
+For3s OS se distribuye bajo **GNU AGPL-3.0** (ver [LICENSE](LICENSE) y [NOTICE](NOTICE)).
+
+- Puedes usar, modificar y redistribuir el software.
+- Si lo ofreces **como servicio en red**, debes publicar tus modificaciones (AGPL).
+- Para uso comercial **sin** las obligaciones de la AGPL, hay licencia comercial
+  disponible — contacto: brayan002150@gmail.com
+
+© 2026 Brian Jovany López Pérez — autor y único titular de los derechos.

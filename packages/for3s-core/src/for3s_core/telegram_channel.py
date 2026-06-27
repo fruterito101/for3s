@@ -1,3 +1,4 @@
+# For3s OS — Copyright (c) 2026 Brian Jovany López Pérez. Licencia AGPL-3.0 (ver LICENSE).
 """Canal Telegram de For3s OS (H3) — el bot que conecta tu celular al cerebro.
 
 Reusa el cerebro completo (Conversation = memoria H2 + Claude H1 + audit):

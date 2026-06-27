@@ -1,3 +1,4 @@
+# For3s OS — Copyright (c) 2026 Brian Jovany López Pérez. Licencia AGPL-3.0 (ver LICENSE).
 """Motor de embeddings de For3s OS (H5, 2026-06-19) — Nodo 2 Hipocampo.
 
 Convierte texto (turnos de memoria, queries) en vectores de 1024 dimensiones que

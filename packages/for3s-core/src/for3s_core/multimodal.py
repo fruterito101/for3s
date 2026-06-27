@@ -1,3 +1,4 @@
+# For3s OS — Copyright (c) 2026 Brian Jovany López Pérez. Licencia AGPL-3.0 (ver LICENSE).
 """Procesa archivos adjuntos (imágenes, PDF, Word, Excel) para que For3s los
 "lea" (2026-06-18, cierre del pendiente "Multimodal").
 

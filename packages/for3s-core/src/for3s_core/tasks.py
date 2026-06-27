@@ -1,3 +1,4 @@
+# For3s OS — Copyright (c) 2026 Brian Jovany López Pérez. Licencia AGPL-3.0 (ver LICENSE).
 """For3s OS — scheduler de jobs en segundo plano (H6 "SE CUIDA").
 
 Worker de Arq que corre los jobs nocturnos de H6:

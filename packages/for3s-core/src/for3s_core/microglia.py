@@ -1,3 +1,4 @@
+# For3s OS — Copyright (c) 2026 Brian Jovany López Pérez. Licencia AGPL-3.0 (ver LICENSE).
 """For3s OS — Microglía: olvido inteligente de memoria (H6 "SE CUIDA", Nodo 6).
 
 En el cerebro, la microglía poda las conexiones neuronales que ya no se usan. Aquí:

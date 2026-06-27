@@ -1,3 +1,4 @@
+# For3s OS — Copyright (c) 2026 Brian Jovany López Pérez. Licencia AGPL-3.0 (ver LICENSE).
 """Fetch de URLs públicas no-GitHub (anotación #1 de el dueño, 2026-06-15).
 
 For3s era cuadrado: ante una URL no-GitHub (Lu.ma, blogs, docs) decía "solo

@@ -1,3 +1,4 @@
+# For3s OS — Copyright (c) 2026 Brian Jovany López Pérez. Licencia AGPL-3.0 (ver LICENSE).
 """For3s OS — EQUIPO multi-usuario (H8 S10, 2026-06-23).
 
 Convierte a For3s de single-owner (1 persona) a multi-usuario: varias personas

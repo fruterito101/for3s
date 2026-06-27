@@ -1,3 +1,4 @@
+# For3s OS — Copyright (c) 2026 Brian Jovany López Pérez. Licencia AGPL-3.0 (ver LICENSE).
 """Conversación con memoria (H2) — une Agent (H1) + memoria + audit.
 
 Orquesta el ciclo completo de un turno CON memoria persistente:

@@ -1,3 +1,4 @@
+# For3s OS — Copyright (c) 2026 Brian Jovany López Pérez. Licencia AGPL-3.0 (ver LICENSE).
 """Normalización de texto de entrada de For3s OS.
 
 Capa estándar para que los DETECTORES/COMPARADORES (huele_a_github,

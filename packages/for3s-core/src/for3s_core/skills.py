@@ -1,3 +1,4 @@
+# For3s OS — Copyright (c) 2026 Brian Jovany López Pérez. Licencia AGPL-3.0 (ver LICENSE).
 """For3s OS — SKILLS (H10 "APRENDE", 2026-06-24).
 
 Una skill = una receta reutilizable (SKILL.md: cuándo usarla + pasos) que el agente

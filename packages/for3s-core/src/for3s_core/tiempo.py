@@ -1,3 +1,4 @@
+# For3s OS — Copyright (c) 2026 Brian Jovany López Pérez. Licencia AGPL-3.0 (ver LICENSE).
 """Hora LOCAL del usuario (2026-06-18).
 
 PROBLEMA: el servidor corre en UTC (red de casa), pero el usuario puede estar

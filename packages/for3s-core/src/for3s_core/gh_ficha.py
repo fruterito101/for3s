@@ -1,3 +1,4 @@
+# For3s OS — Copyright (c) 2026 Brian Jovany López Pérez. Licencia AGPL-3.0 (ver LICENSE).
 """Ficha/infografía de un repo de GitHub (pedido de diseño 2026-06-15).
 
 La barra lateral de github.com (Languages con %, Contributors, Deployments,

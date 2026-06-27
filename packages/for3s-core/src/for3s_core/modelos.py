@@ -1,3 +1,4 @@
+# For3s OS — Copyright (c) 2026 Brian Jovany López Pérez. Licencia AGPL-3.0 (ver LICENSE).
 """For3s OS — registro de modelos LLM seleccionables (cimiento de H7, 2026-06-22).
 
 Idea (el dueño): For3s tiene su propio `/model` (como Claude Code) — al recibir el token,
