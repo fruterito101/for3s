@@ -1,0 +1,56 @@
+# For3s OS — imagen del AGENTE + WORKER (C4).
+# Una sola imagen, dos comandos (el compose elige cuál: bot o worker).
+# Incluye TODO (torch/transformers/BGE-M3) → la memoria semántica es core de For3s.
+# Pesada por diseño (~5-6GB): es el costo de que la memoria real funcione sola.
+
+FROM python:3.12-slim
+
+# Dependencias del SISTEMA que necesitan algunas libs:
+#  - build-essential: por si alguna rueda necesita compilar (hdbscan)
+#  - git/curl: utilidades + descarga de modelos
+#  - ca-certificates: TLS para las llamadas a Claude/GitHub/web
+# NOTA v1 (Opción B): el agente NO lanza contenedores (sin DinD). GitHub-MCP y
+# render llegan en v1.1 como servicios HERMANOS de red. Cero acceso al Docker host.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential git curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# uv (gestor de paquetes/entorno, mismo que en el server)
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+WORKDIR /app
+
+# 1) Copiar SOLO el manifiesto primero (cache de capas: si no cambian las deps,
+#    no se reinstala todo en cada build).
+COPY packages/for3s-core/pyproject.toml packages/for3s-core/
+COPY packages/for3s-core/src/for3s_core/__init__.py packages/for3s-core/src/for3s_core/
+
+# 2) Instalar dependencias al Python del SISTEMA (el que corre el contenedor).
+#    ⭐ torch CPU-only PRIMERO desde el índice CPU de PyTorch: evita las ~14GB de
+#    librerías CUDA (nvidia) que NO se usan en CPU. Baja la imagen de ~16GB a ~2-3GB.
+#    Luego el resto (sentence-transformers ya encuentra el torch-CPU presente).
+RUN uv pip install --system --no-cache \
+        --index-url https://download.pytorch.org/whl/cpu \
+        "torch"
+RUN uv pip install --system --no-cache \
+        "asyncpg>=0.31" "cryptography>=49" "httpx>=0.28" "python-telegram-bot>=22.7" \
+        "rich>=15" "arq>=0.25" "redis>=8" "hiredis>=3" "mcp" \
+        "sentence-transformers>=5" "transformers>=5" \
+        "scikit-learn>=1.9" "hdbscan>=0.8" "numpy>=2"
+
+# 3) Copiar el código completo (cambia seguido → capa final, no invalida deps).
+COPY packages/ packages/
+
+# 4) Pre-descargar el modelo de embeddings BGE-M3 EN EL BUILD (no en el 1er arranque,
+#    que tardaría ~160s la primera vez del tester). Queda horneado en la imagen.
+#    Luego borra el pytorch_model.bin DUPLICADO (~2.2GB): se usa model.safetensors,
+#    el .bin es la copia vieja redundante → ahorra ~2GB en la imagen.
+RUN python -c "from sentence_transformers import SentenceTransformer; \
+    SentenceTransformer('BAAI/bge-m3')" \
+    && find /root/.cache/huggingface -name 'pytorch_model.bin' -delete 2>/dev/null || true
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app/packages/for3s-core/src
+
+# El comando lo define el docker-compose (bot o worker). Default: el bot.
+CMD ["python", "-m", "for3s_core.telegram_channel"]

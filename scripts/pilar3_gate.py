@@ -3,7 +3,7 @@
 
 Freno de despliegue para código auto-generado (Grafo Maestro §8.3/§8.4,
 R10 10.1.1): ningún artefacto generado por el propio sistema llega a main
-ni a producción sin aprobación humana explícita de Brian.
+ni a producción sin aprobación humana explícita del dueño.
 
 HOY (C1) es un skeleton: aún no existe auto-generación, así que el gate
 pasa siempre. PERO el slot vive en el pipeline desde el commit 1, para que

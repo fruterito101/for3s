@@ -2,7 +2,7 @@
 
 Adelanto de R3 (Token Bucket + circuit breaker) + R5 (cost control). Resuelve
 el problema del 429: For3s comparte la cuota de Claude con otros consumidores
-(p.ej. Claude Code del propio Brian), y este gestor reparte la capacidad sin
+(p.ej. Claude Code del propio el dueño), y este gestor reparte la capacidad sin
 pasarse, de tres formas combinadas:
 
   CAPA 1 — Token bucket LOCAL (preventivo): lleva la cuenta de RPM/ITPM/OTPM
@@ -148,16 +148,28 @@ class ConcurrencyManager:
             )
         return self._buckets[model]
 
+    # Tope de espera de CAPA 1 (bucket local). ANTES era 600 iteraciones x 5s =
+    # hasta 50 MINUTOS bloqueando en silencio (causa del bot "mudo" 2026-06-15:
+    # el bucket va a ciegas en OAuth y a veces cree que no hay cuota cuando sí).
+    # Ahora: si en MAX_ESPERA_ACQUIRE seg no se libera, DEJA PASAR y que el 429
+    # real (con su retry-after y aviso amigable) maneje, en vez de colgar mudo.
+    MAX_ESPERA_ACQUIRE = 25.0
+
     def acquire(self, model: str, *, est_input: int = 2000, est_output: int = 1000) -> None:
-        """CAPA 1: espera (cediendo paso) hasta tener capacidad para el request."""
+        """CAPA 1: espera (cediendo paso) hasta tener capacidad, con tope de tiempo.
+
+        Si el bucket local no libera en MAX_ESPERA_ACQUIRE seg, deja pasar: es
+        preferible tocar el 429 real (que avisa) a bloquear minutos en silencio.
+        """
         bucket = self._bucket(model)
-        for _ in range(600):  # tope de seguridad
+        t0 = self._clock()
+        while self._clock() - t0 < self.MAX_ESPERA_ACQUIRE:
             wait = bucket.wait_time(est_input, est_output, self._clock())
             if wait <= 0.0:
                 bucket.consume(est_input, est_output, self._clock())
                 return
-            self._sleep(min(wait, 5.0))
-        # si tras el tope sigue sin haber, deja pasar y que el backoff maneje
+            self._sleep(min(wait, 2.0))
+        # tope alcanzado: deja pasar y que el 429/backoff maneje (con aviso)
         bucket.consume(est_input, est_output, self._clock())
 
     def report(self, model: str, snap: RateLimitSnapshot) -> None:

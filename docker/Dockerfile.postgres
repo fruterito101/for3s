@@ -1,0 +1,24 @@
+# For3s OS — Postgres con AGE + pgvector YA HORNEADOS (C2.B).
+# Parte de apache/age (trae PostgreSQL + Apache AGE) y le añade pgvector.
+# Así el tester NUNCA compila extensiones (la causa #1 de "no me arrancó").
+#
+# apache/age:release_PG16_1.6.0 = PostgreSQL 16 + AGE 1.6.0 (release estable).
+FROM apache/age:release_PG16_1.6.0
+
+# Añadir pgvector (la otra extensión que For3s necesita para los embeddings).
+# Se compila UNA vez aquí, en el build de la imagen — no en la máquina del tester.
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential git ca-certificates postgresql-server-dev-16 \
+    && git clone --branch v0.8.0 --depth 1 https://github.com/pgvector/pgvector.git /tmp/pgvector \
+    && cd /tmp/pgvector && make && make install \
+    && rm -rf /tmp/pgvector \
+    && apt-get purge -y build-essential git ca-certificates postgresql-server-dev-16 \
+    && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
+
+# Script de init: activa las extensiones en la BD al primer arranque.
+# (Las migraciones 001+ ya hacen CREATE EXTENSION, pero esto garantiza que
+#  estén disponibles desde el segundo cero.)
+COPY docker/postgres/init-extensions.sql /docker-entrypoint-initdb.d/00-extensions.sql
+
+USER postgres

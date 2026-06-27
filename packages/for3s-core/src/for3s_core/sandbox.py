@@ -5,7 +5,7 @@ los escribe en un dir temporal y corre `ruff` DENTRO de un contenedor Docker
 ENDURECIDO (sin red, sin root, read-only, límites de CPU/mem). Los hallazgos
 se suman al reporte QA.
 
-Aislamiento (Grafo §6, R4 container hardening — patrón Hermes terminal_tool):
+Aislamiento (Grafo §6, R4 container hardening):
   --network none      sin acceso a red
   --read-only         filesystem inmutable
   --user 10001        sin privilegios

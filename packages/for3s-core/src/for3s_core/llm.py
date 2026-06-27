@@ -13,6 +13,7 @@ El gestor de concurrencia (ConcurrencyManager) reparte la cuota para no pegar
 
 from __future__ import annotations
 
+import logging
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -25,10 +26,13 @@ from for3s_core.concurrency import (
     parse_retry_after,
 )
 
+logger = logging.getLogger("for3s.llm")
+
 API_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_VERSION = "2023-06-01"
 OAUTH_BETA = "oauth-2025-04-20"
 CACHING_BETA = "prompt-caching-2024-07-31"  # Parte C: prompt caching (verificado con OAuth)
+PDFS_BETA = "pdfs-2024-09-25"  # multimodal: leer PDFs como bloque document (2026-06-18)
 
 CLAUDE_CODE_IDENTITY = "You are Claude Code, Anthropic's official CLI for Claude."
 
@@ -46,6 +50,25 @@ class RateLimitExceeded(Exception):
             f"La cuenta de Claude topó su cupo. Reinicia en ~{mins} min. "
             "Usa otra cuenta/API key o intenta más tarde."
         )
+
+
+class ServidorSobrecargado(Exception):
+    """La API de Anthropic devolvió un error transitorio de SU servidor (529/503/
+    502/500) y no se recuperó tras reintentar. NO es culpa nuestra ni del cupo —
+    es sobrecarga temporal de Anthropic. Mensaje amigable, no traceback."""
+
+    def __init__(self, status_code: int) -> None:
+        self.status_code = status_code
+        super().__init__(
+            "Anthropic está saturado en este momento (error temporal de su lado, "
+            f"HTTP {status_code}). No es un problema tuyo ni de tu cupo. "
+            "Reintenta en unos momentos."
+        )
+
+
+# Códigos de error TRANSITORIOS de Anthropic que conviene reintentar (no son del
+# cliente: 529=overloaded, 503=service unavailable, 502=bad gateway, 500=internal).
+_HTTP_TRANSITORIOS = (500, 502, 503, 529)
 
 
 _PRICES = {
@@ -101,47 +124,105 @@ class ClaudeProvider(LLMProvider):
         self._manager = manager or ConcurrencyManager()
         self._sleep = sleep
 
-    def _headers(self) -> dict[str, str]:
+    @property
+    def model(self) -> str:
+        """El modelo activo (para que /model lo lea/muestre)."""
+        return self._model
+
+    def set_model(self, model: str) -> None:
+        """Cambia el modelo en caliente (lo usa el /model de For3s). Mantiene el
+        manager de concurrencia y todo lo demás — solo cambia a qué modelo apunta."""
+        self._model = model
+
+    def _headers(self, *, betas_extra: tuple[str, ...] = ()) -> dict[str, str]:
         h = {"anthropic-version": ANTHROPIC_VERSION, "content-type": "application/json"}
         # Parte C: el beta de caching va SIEMPRE (inofensivo si el payload no
         # usa cache_control; necesario cuando sí). En OAuth se combina con su beta.
+        # betas_extra: betas puntuales por request (ej. PDFs multimodales).
+        betas = [CACHING_BETA, *betas_extra]
         if self._oauth:
             h["authorization"] = f"Bearer {self._token}"
-            h["anthropic-beta"] = f"{OAUTH_BETA},{CACHING_BETA}"
+            betas = [OAUTH_BETA, *betas]
         else:
             h["x-api-key"] = self._token
-            h["anthropic-beta"] = CACHING_BETA
+        h["anthropic-beta"] = ",".join(betas)
         return h
 
     def _build_system(self, system: str) -> str:
         if self._oauth:
-            extra = f"\n\n{system}" if system else ""
-            return f"{CLAUDE_CODE_IDENTITY}{extra}"
+            # BLINDAJE 429-system (2026-06-22): el OAuth de suscripción RECHAZA
+            # con un falso-429 cualquier system prompt custom. Por eso, en OAuth, el
+            # system SIEMPRE debe ser solo la identidad de Claude Code; el rol/contexto
+            # va en el USER message (así lo hacen TODOS los flujos). Si un flujo futuro
+            # se equivoca y pasa un system NO vacío, NO lo concatenamos (eso dispararía
+            # el 429) → lo ignoramos a nivel system y AVISAMOS en el log para cazarlo.
+            # Última línea de defensa: degrada en vez de romper.
+            if system:
+                logger.error(
+                    "[429-GUARD] se pasó un system custom en modo OAuth (%d chars) → "
+                    "lo ignoro para no disparar el falso-429. El flujo que llama debe "
+                    "poner sus instrucciones en el USER message, no en system. "
+                    "system[:80]=%r", len(system), system[:80],
+                )
+            return CLAUDE_CODE_IDENTITY
         return system
 
-    def _request_once(self, payload: dict) -> httpx.Response:
-        return httpx.post(API_URL, headers=self._headers(), json=payload, timeout=self._timeout)
+    def _request_once(self, payload: dict, betas_extra: tuple[str, ...] = ()) -> httpx.Response:
+        return httpx.post(
+            API_URL, headers=self._headers(betas_extra=betas_extra),
+            json=payload, timeout=self._timeout,
+        )
 
-    def _post(self, payload: dict, *, est_in: int, est_out: int, max_retries: int = 5):
+    def _post(self, payload: dict, *, est_in: int, est_out: int, max_retries: int = 5,
+              betas_extra: tuple[str, ...] = ()):
         """CAPA 1 (acquire) + CAPA 3 (backoff retry-after) + CAPA 2 (report headers)."""
         for attempt in range(max_retries):
             # CAPA 1: pide turno al gestor (cede paso si no hay cuota)
             self._manager.acquire(self._model, est_input=est_in, est_output=est_out)
 
-            resp = self._request_once(payload)
+            resp = self._request_once(payload, betas_extra)
 
             if resp.status_code == 429:
-                # CAPA 3: respeta el retry-after exacto
+                # DIAGNÓSTICO (2026-06-22): hay DOS tipos de 429 que conviene
+                # distinguir (antes se trataban igual y confundían el debug):
+                #   (a) 429 REAL de rate-limit → trae header retry-after → esperar sirve.
+                #   (b) 429 FALSO = el OAuth de suscripción RECHAZA un system prompt
+                #       custom → mensaje "Error" sin retry-after → reintentar es INÚTIL;
+                #       el fix es poner el rol en el user message y system="" (ver H6).
+                tiene_retry = resp.headers.get("retry-after") is not None
+                cuerpo = (resp.text or "")[:120]
+                if not tiene_retry and '"message":"Error"' in cuerpo:
+                    logger.error(
+                        "[429-SYSTEM] OAuth rechazó un system prompt custom (NO es "
+                        "rate-limit real, sin retry-after). Revisar que el rol vaya en "
+                        "el user message y system='' en este flujo. cuerpo=%s", cuerpo,
+                    )
+                    raise RateLimitExceeded(0)  # reintentar no ayuda → aviso amigable
+                # CAPA 3: 429 real → respeta el retry-after exacto
                 wait = parse_retry_after(resp.headers)
+                logger.warning(
+                    "[429-RATE] rate-limit real (retry-after=%.0fs, intento %d/%d)",
+                    wait, attempt + 1, max_retries,
+                )
                 if wait > MAX_WAIT_SECONDS:
                     raise RateLimitExceeded(wait)
                 if attempt < max_retries - 1:
                     self._sleep(wait)
                     continue
                 # Agotados los reintentos por 429 → mensaje AMIGABLE, no traceback.
-                # El tool-use con suscripción topa el rate-limit instantáneo más
-                # rápido (payloads grandes); cuando insiste, avisamos con gracia.
                 raise RateLimitExceeded(wait)
+
+            if resp.status_code in _HTTP_TRANSITORIOS:
+                # Error TRANSITORIO de Anthropic (529 overloaded, 503, 502, 500).
+                # NO es del cliente ni del cupo → reintentar con BACKOFF exponencial
+                # (estos errores NO traen retry-after). Antes esto reventaba en
+                # raise_for_status() y dejaba al bot MUDO (hueco 440-448, 2026-06-22).
+                if attempt < max_retries - 1:
+                    espera = min(2.0 * (2 ** attempt), MAX_WAIT_SECONDS)  # 2,4,8,16…
+                    self._sleep(espera)
+                    continue
+                # Agotados los reintentos → mensaje amigable, no traceback.
+                raise ServidorSobrecargado(resp.status_code)
 
             resp.raise_for_status()
             # CAPA 2: aprende de los headers cuánta cuota queda
@@ -151,20 +232,42 @@ class ClaudeProvider(LLMProvider):
         raise RateLimitExceeded(parse_retry_after({}))
 
     def complete(
-        self, user_message: str, *, system: str = "", max_tokens: int = 1024
+        self, user_message: str, *, system: str = "", max_tokens: int = 1024,
+        adjuntos: list[dict] | None = None,
     ) -> LLMResponse:
+        # adjuntos: bloques multimodales (imagen/document/texto extraído) que
+        # acompañan al mensaje (2026-06-18). Si vienen, el content deja de
+        # ser un string y pasa a ser una LISTA de bloques: primero el texto del
+        # usuario, luego los adjuntos. Si no, todo sigue igual (texto puro).
+        if adjuntos:
+            content: list[dict] = [{"type": "text", "text": user_message}]
+            content.extend(adjuntos)
+            messages = [{"role": "user", "content": content}]
+        else:
+            messages = [{"role": "user", "content": user_message}]
         payload: dict = {
             "model": self._model,
             "max_tokens": max_tokens,
-            "messages": [{"role": "user", "content": user_message}],
+            "messages": messages,
         }
         full_system = self._build_system(system)
         if full_system:
             payload["system"] = full_system
 
-        # estimación gruesa de tokens para el gestor (R3 refinará con tokenizer)
-        est_in = max(100, len(user_message) // 3 + len(full_system) // 3)
-        data, resp_headers = self._post(payload, est_in=est_in, est_out=max_tokens)
+        # Si algún adjunto es un PDF (bloque document), la API exige el beta de
+        # PDFs. Inofensivo si no hay PDF; solo lo añadimos cuando lo hay.
+        betas_extra: tuple[str, ...] = ()
+        if adjuntos and any(b.get("type") == "document" for b in adjuntos):
+            betas_extra = (PDFS_BETA,)
+
+        # estimación gruesa de tokens para el gestor (R3 refinará con tokenizer).
+        # Los adjuntos en base64 pesan; sumamos su largo para que el bucket no
+        # subestime y no topemos el rate-limit.
+        peso_adj = sum(len(str(b)) for b in adjuntos) // 3 if adjuntos else 0
+        est_in = max(100, len(user_message) // 3 + len(full_system) // 3 + peso_adj)
+        data, resp_headers = self._post(
+            payload, est_in=est_in, est_out=max_tokens, betas_extra=betas_extra,
+        )
 
         text = "".join(
             block.get("text", "")

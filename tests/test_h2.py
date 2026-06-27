@@ -17,9 +17,13 @@ class FakeProvider(LLMProvider):
         self.last_prompt = ""
 
     def complete(
-        self, user_message: str, *, system: str = "", max_tokens: int = 1024
+        self, user_message: str, *, system: str = "", max_tokens: int = 1024,
+        adjuntos: list[dict] | None = None, **kwargs,
     ) -> LLMResponse:
+        # adjuntos/**kwargs: el provider real ganó params opcionales (multimodal,
+        # 2026-06-18); el fake los acepta y los ignora para no romper el test.
         self.last_prompt = user_message
+        self.last_adjuntos = adjuntos
         return LLMResponse(text="ok", input_tokens=1, output_tokens=1, model="m")
 
 
@@ -58,11 +62,11 @@ def test_agente_arma_historial() -> None:
     fake = FakeProvider()
     agent = Agent(fake)
     history = [
-        {"role": "user", "content": "hola, me llamo Brian"},
-        {"role": "assistant", "content": "hola Brian"},
+        {"role": "user", "content": "hola, me llamo el dueño"},
+        {"role": "assistant", "content": "hola el dueño"},
         {"role": "user", "content": "¿cómo me llamo?"},
     ]
     agent.ask_with_history(history)
     # el prompt debe incluir el contexto previo (la memoria)
-    assert "Brian" in fake.last_prompt
+    assert "el dueño" in fake.last_prompt
     assert "¿cómo me llamo?" in fake.last_prompt

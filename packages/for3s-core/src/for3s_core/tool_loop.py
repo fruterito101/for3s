@@ -18,9 +18,13 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from for3s_core.llm import ClaudeProvider, RateLimitExceeded
 from for3s_core.mcp_client import GitHubMCPClient
+
+if TYPE_CHECKING:
+    from for3s_core.cache import GitHubCache
 
 # Tope de vueltas tool→result→tool por turno. CADA vuelta = 1 request con tools
 # (payload pesado). La suscripción topa el rate-limit instantáneo si se encadenan
@@ -35,22 +39,119 @@ MAX_TOOL_ROUNDS = 5
 # ciegas → mejor espaciar las llamadas (cada vuelta reenvía schemas pesados).
 # Solo aplica entre vueltas (no antes de la primera) → no ralentiza el caso
 # de 1 sola llamada.
-ESPACIADO_ENTRE_VUELTAS = 3.0
+# Anexo R3: el control real es por USO (fila de 1, await secuencial). Esto queda
+# solo como red de seguridad minima entre vueltas (ya no es el mecanismo principal).
+ESPACIADO_ENTRE_VUELTAS = 0.5
 
 # Whitelist MVP: las tools de LECTURA esenciales. Antes solo 4 (issues/PRs) →
 # por eso "analizar un repo completo" fallaba: el agente no podía LEER el
-# contenido del repo (README, archivos). Ahora 6, incluyendo get_file_contents
-# (leer README/archivos) y search_code (buscar en el repo) → puede analizar un
-# repo de verdad. El riesgo de rate-limit por # de schemas se mitiga con el
+# contenido del repo (README, archivos). Ahora 8, incluyendo get_file_contents
+# (leer README/archivos), search_code (buscar en el repo) y search_issues/
+# search_pull_requests (CONTAR exacto vía total_count en 1 llamada — el dueño
+# 2026-06-18: antes los conteos grandes quedaban parciales porque se paginaba
+# con list_* y se agotaba MAX_TOOL_ROUNDS; search_* da el número exacto sin
+# paginar). El riesgo de rate-limit por # de schemas (+31%) se mitiga con el
 # prompt caching (Parte C). Si reaparece el 429 por tamaño, rotar set por intención.
 MVP_TOOLS = {
     "list_issues",
     "issue_read",
     "list_pull_requests",
     "pull_request_read",
-    "get_file_contents",  # leer README/archivos → analizar repo completo
-    "search_code",        # buscar en el repo
+    "get_file_contents",      # leer README/archivos → analizar repo completo
+    "search_code",            # buscar en el repo
+    "search_issues",          # CONTAR issues exacto (total_count) en 1 llamada
+    "search_pull_requests",   # CONTAR PRs exacto (total_count) en 1 llamada
 }
+
+# ─────────────────────── WRITE TOOLS (con confirmación) ───────────────────────
+# 2026-06-18: For3s pasa de read-only a poder ESCRIBIR en GitHub, pero SOLO
+# un subconjunto SEGURO y REVERSIBLE, y SIEMPRE con confirmación humana (botón en
+# Telegram). NADA destructivo (sin merge, sin delete/create repo, sin push de
+# archivos). Diseño R4.2.1: estas 4 son clase "write" (mutaciones acumulativas).
+#
+# WHITELIST DURA: aunque el modelo PIDA otra write (delete_repository, merge…),
+# el gate la rechaza porque NO está aquí. Es la garantía de seguridad central.
+#
+# El cliente MCP de lectura corre read-only → NO expone estas tools. Por eso
+# INYECTAMOS sus schemas a mano (controlamos exactamente los campos). El agente
+# las PROPONE; el loop NO las ejecuta (gate de intención) → se ejecutan solo
+# tras el clic de confirmación, en un contenedor write-capable efímero.
+WRITE_TOOLS_PERMITIDAS = {
+    "add_issue_comment",
+    "create_issue",
+    "create_pull_request",
+    "create_pull_request_review",
+}
+
+# Schemas mínimos de las write tools (campos esenciales del GitHub MCP server).
+# Se inyectan junto a las read para que Claude pueda PROPONERLAS.
+WRITE_TOOL_SCHEMAS = [
+    {
+        "name": "add_issue_comment",
+        "description": "Comenta en un issue o pull request existente. REQUIERE "
+                       "confirmación del usuario antes de ejecutarse.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "owner": {"type": "string", "description": "Dueño del repo"},
+                "repo": {"type": "string", "description": "Nombre del repo"},
+                "issue_number": {"type": "integer", "description": "Número del issue/PR"},
+                "body": {"type": "string", "description": "Texto del comentario"},
+            },
+            "required": ["owner", "repo", "issue_number", "body"],
+        },
+    },
+    {
+        "name": "create_issue",
+        "description": "Crea un issue nuevo en un repo. REQUIERE confirmación del "
+                       "usuario antes de ejecutarse.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "owner": {"type": "string"},
+                "repo": {"type": "string"},
+                "title": {"type": "string", "description": "Título del issue"},
+                "body": {"type": "string", "description": "Cuerpo del issue"},
+            },
+            "required": ["owner", "repo", "title"],
+        },
+    },
+    {
+        "name": "create_pull_request",
+        "description": "Crea un pull request. REQUIERE confirmación del usuario "
+                       "antes de ejecutarse. NO mergea (eso es destructivo y no "
+                       "está permitido).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "owner": {"type": "string"},
+                "repo": {"type": "string"},
+                "title": {"type": "string"},
+                "head": {"type": "string", "description": "Rama con los cambios"},
+                "base": {"type": "string", "description": "Rama destino"},
+                "body": {"type": "string"},
+            },
+            "required": ["owner", "repo", "title", "head", "base"],
+        },
+    },
+    {
+        "name": "create_pull_request_review",
+        "description": "Crea un review/comentario en un PR. REQUIERE confirmación "
+                       "del usuario. Usa event=COMMENT (no APPROVE/REQUEST_CHANGES "
+                       "sin pedirlo explícito).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "owner": {"type": "string"},
+                "repo": {"type": "string"},
+                "pull_number": {"type": "integer"},
+                "body": {"type": "string"},
+                "event": {"type": "string", "description": "COMMENT, APPROVE o REQUEST_CHANGES"},
+            },
+            "required": ["owner", "repo", "pull_number", "body", "event"],
+        },
+    },
+]
 
 
 def _pct(headers: dict, name: str) -> float | None:
@@ -71,6 +172,10 @@ class ToolLoopResult:
     usage_5h: float | None = None
     usage_7d: float | None = None
     tool_calls: list[dict] = field(default_factory=list)  # auditoría: qué tools se usaron
+    # Si el agente PROPUSO una write tool (comentar/crear), aquí queda {name, args}
+    # pendiente de confirmación humana. El canal de Telegram la convierte en un
+    # botón. None = no hay nada que confirmar (turno read-only normal).
+    accion_pendiente: dict | None = None
 
 
 async def run_tool_loop(
@@ -80,14 +185,24 @@ async def run_tool_loop(
     *,
     system: str = "",
     max_tokens: int = 2048,
+    cache: GitHubCache | None = None,
+    workspace_id: str = "default",
 ) -> ToolLoopResult:
     """Corre el loop de tool-use hasta que Claude da una respuesta final.
 
     messages: historial en formato Anthropic (el último es el user actual).
     Devuelve el texto final + métricas + las tools que se llamaron.
+
+    cache: cache Valkey opcional (2026-06-18). Si se pasa, las lecturas
+    cacheables de GitHub se sirven de Valkey cuando hay hit → menos llamadas a
+    la API y menos rate-limit. Si es None, funciona igual sin cache (degrada).
+    workspace_id: namespace de la cache key (multi-tenant futuro).
     """
     all_tools = await mcp.tools_for_anthropic()
     tools = [t for t in all_tools if t["name"] in MVP_TOOLS]
+    # Inyectar las write tools seguras (el MCP read-only no las expone). El agente
+    # puede PROPONERLAS; el gate de abajo NO las ejecuta → van a confirmación.
+    tools = tools + WRITE_TOOL_SCHEMAS
     out = ToolLoopResult(text="")
 
     for vuelta in range(MAX_TOOL_ROUNDS):
@@ -139,11 +254,63 @@ async def run_tool_loop(
             name = block.get("name")
             args = block.get("input", {})
             tool_id = block.get("id")
-            try:
-                result_text = await mcp.call_tool(name, args)
-            except Exception as exc:  # tool falló: devolver error legible a Claude
-                result_text = f"Error ejecutando {name}: {exc}"
-            out.tool_calls.append({"name": name, "args": args, "result": result_text})
+
+            # ── GATE DE SEGURIDAD ────────────────────────────────────────────
+            # 1) WRITE permitida → NO ejecutar. Capturar como acción pendiente de
+            #    confirmación humana y devolver al modelo un tool_result que lo
+            #    haga CERRAR el turno (el canal mostrará el botón). Solo la PRIMERA
+            #    write propuesta se toma (una confirmación por turno, simple/seguro).
+            if name in WRITE_TOOLS_PERMITIDAS:
+                if out.accion_pendiente is None:
+                    out.accion_pendiente = {"name": name, "args": args}
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": tool_id,
+                    "content": (
+                        "ACCIÓN PROPUESTA, NO EJECUTADA. Esta acción de escritura "
+                        "requiere que el usuario la confirme con un botón. NO la "
+                        "repitas ni intentes otra herramienta: responde en UNA "
+                        "frase qué vas a hacer y dile al usuario que confirme abajo."
+                    ),
+                })
+                continue
+            # 2) Cualquier write/destructive NO permitida (delete_repository,
+            #    merge_pull_request, push_files…) → RECHAZO DURO. Nunca se ejecuta.
+            if name not in MVP_TOOLS:
+                result_text = (
+                    f"BLOQUEADO: la herramienta '{name}' no está permitida. For3s "
+                    "solo puede comentar y crear issues/PRs (con confirmación), y "
+                    "leer. NO puede mergear, borrar, ni modificar archivos. Dile "
+                    "esto al usuario con honestidad."
+                )
+                out.tool_calls.append({"name": name, "args": args, "result": result_text})
+                tool_results.append({
+                    "type": "tool_result", "tool_use_id": tool_id, "content": result_text,
+                })
+                continue
+            # 3) READ permitida → cache primero, si no, ejecutar.
+            # CACHE (Valkey): si la tool es cacheable y hay hit, servimos de
+            # Valkey sin pegarle a GitHub (menos llamadas, menos rate-limit). El
+            # cache degrada solo si Valkey falla (get devuelve None → se lee).
+            result_text = None
+            cacheado = False
+            if cache is not None:
+                hit = await cache.get(workspace_id, name, args)
+                if hit is not None:
+                    result_text = hit
+                    cacheado = True
+            if result_text is None:
+                try:
+                    result_text = await mcp.call_tool(name, args)
+                    # guardar en cache SOLO si la tool es cacheable (cache.set
+                    # ya filtra never-cache/write y degrada si Valkey falla).
+                    if cache is not None:
+                        await cache.set(workspace_id, name, args, result_text)
+                except Exception as exc:  # tool falló: error legible a Claude
+                    result_text = f"Error ejecutando {name}: {exc}"
+            out.tool_calls.append({
+                "name": name, "args": args, "result": result_text, "cacheado": cacheado,
+            })
             tool_results.append(
                 {
                     "type": "tool_result",
@@ -152,6 +319,10 @@ async def run_tool_loop(
                 }
             )
         messages.append({"role": "user", "content": tool_results})
+
+        # Si se propuso una write, no seguimos iterando: dejamos que el modelo dé
+        # su frase final (en la siguiente vuelta verá el tool_result y cerrará).
+        # El canal toma out.accion_pendiente y muestra el botón de confirmación.
 
     # Se agotaron las rondas. En vez de un fallback pobre, una ÚLTIMA llamada
     # SIN tools pidiendo a Claude que responda con lo que YA recabó (Fallo 2:

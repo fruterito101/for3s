@@ -4,8 +4,15 @@ version = "0.0.1"
 description = "For3s OS — agente-cerebro multi-tenant, self-hosted (monorepo)"
 requires-python = ">=3.12,<3.13"
 dependencies = [
+    "arq>=0.25.0",
     "for3s-core",
+    "hdbscan>=0.8.44",
     "mcp>=1.27.2",
+    "openpyxl>=3.1.5",
+    "playwright>=1.60.0",
+    "python-docx>=1.2.0",
+    "redis>=8.0.0",
+    "sentence-transformers>=5.6.0",
 ]
 
 [dependency-groups]

@@ -92,10 +92,28 @@ async def run(session_id: str) -> int:
         await pool.close()
 
 
+async def migrate_only() -> int:
+    """Solo aplica migraciones y sale (para el arranque en contenedor, C2.A).
+    El agente corre esto ANTES de levantar el bot — crea las 23 tablas en orden."""
+    settings = load_settings()
+    if not settings.database_url:
+        console.print("[red]Falta DATABASE_URL.[/red]")
+        return 1
+    pool = await db.connect(settings.database_url)
+    try:
+        aplicadas = await db.apply_migrations(pool)
+        console.print(f"[green]migraciones aplicadas:[/green] {aplicadas or 'ninguna pendiente'}")
+        return 0
+    finally:
+        await pool.close()
+
+
 def main() -> int:
     session_id = "cli-default"
     _force_utf8()
     args = sys.argv[1:]
+    if args and args[0] == "migrate":
+        return asyncio.run(migrate_only())
     if "--session" in args:
         i = args.index("--session")
         if i + 1 < len(args):

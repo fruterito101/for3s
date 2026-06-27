@@ -1,22 +1,41 @@
-# Python / uv
-.venv/
-__pycache__/
-*.pyc
-*.egg-info/
-dist/
-.pytest_cache/
-.ruff_cache/
+# For3s OS — .gitignore (repo PÚBLICO). Blindado: nada sensible debe entrar.
 
-# Secrets — NUNCA al repo (Master KEK siempre offline)
+# ─── SECRETOS — NUNCA al repo (regla de oro: KEK offline, sin plaintext) ───
 .env
 .env.*
 *.key
 *.pem
 secrets/
+# KEK + config local del host (master.key)
+.for3s/
+*.bak
+*.bak-*
 
-# OS / editor
+# ─── Cerebro documental privado — NO es parte del producto ───
+Mente/
+
+# ─── Python / uv ───
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.python-version
+
+# ─── Datos / runtime local ───
+*.sqlite
+*.db
+*.log
+backups/
+for3s-backups*/
+
+# ─── OS / editor ───
 .DS_Store
 .idea/
 .vscode/
-# datos locales del canal (owner store)
-.for3s/

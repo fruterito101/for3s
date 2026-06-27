@@ -4,7 +4,7 @@
 -- 'cli' para siempre aunque Telegram la usara. Resultado: imposible saber por
 -- qué canal entró cada mensaje.
 --
--- Decisión de diseño (Brian, 2026-06-13): memoria COMPARTIDA entre CLI y
+-- Decisión de diseño (el dueño, 2026-06-13): memoria COMPARTIDA entre CLI y
 -- Telegram (un solo cerebro, sesión "brian"). Lo que se arregla es la
 -- TRAZABILIDAD: cada turno guarda su propio canal de origen.
 --
