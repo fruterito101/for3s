@@ -1,0 +1,12 @@
+# For3s OS — normalize line endings across OSes (avoids Windows/Linux churn).
+* text=auto eol=lf
+
+# Shell scripts must keep LF (they run on Linux).
+*.sh text eol=lf
+
+# Binary / non-diffable files.
+*.png binary
+*.jpg binary
+*.safetensors binary
+*.bin binary
+uv.lock -diff
