@@ -3,6 +3,7 @@
 # ─── SECRETOS — NUNCA al repo (regla de oro: KEK offline, sin plaintext) ───
 .env
 .env.*
+!.env.example
 *.key
 *.pem
 secrets/
