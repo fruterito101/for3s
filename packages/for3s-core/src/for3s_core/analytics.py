@@ -136,9 +136,48 @@ async def datos_personas(pool: asyncpg.Pool) -> list[str]:
     return lineas
 
 
+async def datos_equipo(pool: asyncpg.Pool) -> list[str]:
+    """Uso del EQUIPO multi-agente (H8) — corridas, tokens, familia. Lee
+    `corridas_equipo` (la escribe handoff.registrar_corrida). HA-1: esta tabla tenía
+    observabilidad RICA pero NADIE la leía (ni /datos ni /salud) → el costo del equipo
+    era invisible. Aquí se conecta. Si el equipo nunca corrió, lo dice (es normal: el
+    disparo es conservador, solo con 'analiza a fondo'/'lanza el equipo')."""
+    lineas = ["🤝 *Equipo multi-agente (H8)*"]
+    async with pool.acquire() as conn:
+        tot = await conn.fetchrow(
+            "SELECT count(*) corridas, COALESCE(sum(tokens_in+tokens_out),0) tokens, "
+            "COALESCE(round(avg(segundos)::numeric,0),0) seg_prom, "
+            "COALESCE(sum(n_ok),0) ok, COALESCE(sum(n_specialists),0) total, "
+            "max(creado_at)::date ultima FROM corridas_equipo"
+        )
+        por_fam = await conn.fetch(
+            "SELECT familia, count(*) veces, sum(tokens_in+tokens_out) tokens "
+            "FROM corridas_equipo GROUP BY familia ORDER BY veces DESC"
+        )
+    if not tot or tot["corridas"] == 0:
+        lineas.append("  (el equipo aún no se ha disparado — normal, disparo conservador)")
+        return lineas
+    lineas.append(
+        f"  {tot['corridas']} corrida(s) · ~{int(tot['tokens']):,} tokens · "
+        f"~{int(tot['seg_prom'])}s prom · {tot['ok']}/{tot['total']} specialists ok"
+    )
+    for f in por_fam:
+        fam = "técnica" if f["familia"] == "tecnica" else "general"
+        lineas.append(f"  {fam}: {f['veces']} vez(ces) · ~{int(f['tokens'] or 0):,} tokens")
+    lineas.append(f"  última: {tot['ultima']}")
+    return lineas
+
+
 async def reporte_datos(pool: asyncpg.Pool) -> str:
     """Reporte completo de analítica para /datos. Defensivo por sección."""
-    secciones = [datos_actividad, datos_consumo, datos_repos, datos_capacidades, datos_personas]
+    secciones = [
+        datos_actividad,
+        datos_consumo,
+        datos_repos,
+        datos_capacidades,
+        datos_personas,
+        datos_equipo,
+    ]
     out = ["📊 *DATOS DE FOR3S OS* (uso real, sin inflar)\n"]
     for fn in secciones:
         try:
