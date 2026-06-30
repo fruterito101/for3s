@@ -47,6 +47,9 @@ services:
     depends_on:
       postgres: { condition: service_healthy }   # ← no arranca hasta que la BD esté lista
       valkey:   { condition: service_healthy }
+      github-mcp:       { condition: service_started }  # BUG-9: el hermano MCP read
+      github-mcp-write: { condition: service_started }  # BUG-9: el hermano MCP write
+      render:           { condition: service_started }  # BUG-9b: el hermano render
     environment:
       DATABASE_URL: postgresql://for3s:${POSTGRES_PASSWORD:-for3s_local}@postgres:5432/for3s
       VALKEY_HOST: valkey
@@ -60,6 +63,8 @@ services:
     command: ["sh", "-c", "python -m for3s_core.cli migrate && python -m for3s_core.telegram_channel"]
     volumes:
       - /home/brianweb3/.for3s:/root/.for3s        # KEK del host (cifra/descifra secretos)
+      - /home/brianweb3/.for3s:/app/.for3s         # owner/cupo (OwnerStore lee de cwd=/app/.for3s)
+      - /home/brianweb3/for3s-backups:/root/for3s-backups  # BUG-6 fix: backups al HOST
     # v1 (Opción B): el agente NO lanza contenedores (sin DinD, cero acceso al
     # Docker del host). GitHub-MCP y render llegan en v1.1 como servicios HERMANOS
     # de red declarados aquí mismo, y el agente solo se conecta a ellos.
@@ -81,6 +86,31 @@ services:
     command: ["arq", "for3s_core.tasks.WorkerSettings"]
     volumes:
       - /home/brianweb3/.for3s:/root/.for3s
+      - /home/brianweb3/.for3s:/app/.for3s
+      - /home/brianweb3/for3s-backups:/root/for3s-backups  # BUG-6 fix: backups al HOST
+    restart: unless-stopped
+
+  # 5) GITHUB MCP (read-only) — HERMANO de red (v1.1, BUG-9). El bot se conecta por
+  #    HTTP (http://github-mcp:8082/mcp) en vez de lanzar `docker run` (sin DinD).
+  #    El PAT viaja en el header Authorization de cada request (autentica por request).
+  github-mcp:
+    image: ghcr.io/github/github-mcp-server:latest
+    command: ["http", "--read-only", "--toolsets", "issues,pull_requests,repos"]
+    restart: unless-stopped
+
+  # 6) GITHUB MCP WRITE — HERMANO aparte, SIN --read-only. Solo writes confirmadas.
+  github-mcp-write:
+    image: ghcr.io/github/github-mcp-server:latest
+    command: ["http", "--toolsets", "issues,pull_requests,repos"]
+    restart: unless-stopped
+
+  # 7) RENDER — HERMANO de red (v1.1, BUG-9b). Chromium headless para SPAs/JS.
+  #    El bot le pide GET http://render:8080/?url=... (antes era `docker run`).
+  render:
+    build:
+      context: ./docker/render
+      dockerfile: Dockerfile
+    image: for3s-render:latest
     restart: unless-stopped
 
 volumes:

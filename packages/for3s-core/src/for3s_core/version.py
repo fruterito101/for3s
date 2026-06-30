@@ -16,15 +16,28 @@ entrada al inicio de CHANGELOG. Un solo lugar.
 from __future__ import annotations
 
 # ── Versión actual ─────────────────────────────────────────────────────────
-VERSION = "0.12.0"  # semver (0.x = alpha; H10 PLANEA — metacognición)
-HITO = "H10 PLANEA"  # hito actual
-HITO_DESC = "metacognición: sé cuándo NO sé (mido mi confianza antes de afirmar)"
-FASE = "H10-PLANEA v1 (confidence scoring + honestidad en baja confianza, en chat)"
+VERSION = "0.13.0"  # semver (0.x = alpha; PROFESIONALIZACIÓN — producto, no MVP)
+HITO = "PROFESIONALIZACIÓN"  # fase actual
+HITO_DESC = "ser PRODUCTO de verdad: salud/monitoreo, soporte, claridad, sin bugs en silencio"
+FASE = "Profesionalización 4/10 (PR1 claridad · PR2 monitoreo · PR4 auditoría · PR10 soporte)"
 
 # ── Changelog por HITOS (lo nuevo arriba) ──────────────────────────────────
 # Cada entrada: (versión, hito, fecha, [qué trae]). El agente lee esto para
 # responder qué cualidades nuevas y viejas tiene.
 CHANGELOG: list[dict] = [
+    {
+        "version": "0.13.0",
+        "hito": "PROFESIONALIZACIÓN",
+        "fecha": "2026-06-29",
+        "cambios": [
+            "Me migré a contenedores conservando toda mi memoria (Docker compose)",
+            "Me monitoreo end-to-end: /salud (la línea mensaje→memoria, integraciones, tokens)",
+            "Te alerto solo por Telegram si algún subsistema se rompe (nada pasa en silencio)",
+            "Soporte: /ayuda · /diagnostico personal · /reconectar (ya no dependes de soporte humano)",
+            "Saneamiento: arreglé 11 bugs (backup, olvido, consolidación, GitHub/web por red, embeddings)",
+            "GitHub y web ahora corren como servicios HERMANOS de red (sin acceso al Docker host)",
+        ],
+    },
     {
         "version": "0.12.0",
         "hito": "H10 PLANEA",
@@ -151,8 +164,9 @@ def resumen(schema_version: int | None = None) -> str:
     for c in nuevo["cambios"]:
         lineas.append(f"   - {c}")
     lineas.append(
-        "• Hitos completos hasta hoy: H1·H2·H3·H4 (MVP) → H5 (memoria) → "
-        "H6 (se cuida) → H7 /model → H8 (equipo+multiusuario)."
+        "• Hitos completos hasta hoy: H1-H4 (MVP) → H5 (memoria) → H6 (se cuida) → "
+        "H7 /model → H8 (equipo) → H9 (sueña) → H10 (planea) → H11-H12 (aprende) → "
+        "PROFESIONALIZACIÓN (contenedores, monitoreo, soporte)."
     )
     return "\n".join(lineas)
 

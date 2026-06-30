@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 
 import httpx
@@ -36,8 +37,10 @@ _UA = "Mozilla/5.0 (compatible; For3sOS/1.0)"
 # Umbral: si el texto útil extraído por httpx es más corto que esto, asumimos
 # que es una SPA sin renderizar (cáscara JS) y vale la pena el render headless.
 UMBRAL_SPA = 350
-RENDER_IMAGE = "for3s-render:latest"
-RENDER_TIMEOUT = 45.0  # docker run + render de Chromium
+# v1.1 BUG-9b: el render es un SERVICIO HERMANO de red (no docker run). El bot
+# le pide por HTTP. URL por env para otros despliegues.
+RENDER_URL = os.environ.get("FOR3S_RENDER_URL", "http://render:8080/")
+RENDER_TIMEOUT = 45.0  # render de Chromium
 
 # Señales de que la página exige iniciar sesión (no peleamos contra esto).
 _SENALES_LOGIN = (
@@ -121,31 +124,18 @@ def _largo_contenido(texto: str) -> int:
 
 
 async def _render_headless(url: str) -> tuple[bool, str]:
-    """Renderiza la URL en el contenedor Docker (Chromium headless). Devuelve
-    (ok, texto_o_error). Usa --network host para alcanzar internet del server."""
+    """Renderiza la URL pidiendola al SERVICIO HERMANO 'render' por HTTP (v1.1
+    BUG-9b). Devuelve (ok, texto_o_error). El hermano corre Chromium headless y
+    devuelve {ok,titulo,texto,error}. Reemplaza el viejo docker run (el bot ya no
+    tiene acceso a Docker)."""
     try:
-        proc = await asyncio.create_subprocess_exec(
-            "docker",
-            "run",
-            "--rm",
-            "--network",
-            "host",
-            RENDER_IMAGE,
-            url,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        out, err = await asyncio.wait_for(proc.communicate(), timeout=RENDER_TIMEOUT)
-    except TimeoutError:
-        return False, "render: el navegador tardó demasiado"
+        async with httpx.AsyncClient(timeout=RENDER_TIMEOUT) as cli:
+            resp = await cli.get(RENDER_URL, params={"url": url})
+        data = resp.json()
+    except httpx.TimeoutException:
+        return False, "render: el navegador tardo demasiado"
     except Exception as exc:  # noqa: BLE001
         return False, f"render no disponible ({type(exc).__name__}: {exc})"
-    if not out:
-        return False, f"render sin salida ({(err or b'').decode(errors='replace')[:200]})"
-    try:
-        data = json.loads(out.decode(errors="replace").strip().splitlines()[-1])
-    except (ValueError, IndexError):
-        return False, "render: salida ilegible"
     if not data.get("ok"):
         return False, f"render falló ({data.get('error')})"
     titulo = (data.get("titulo") or "").strip()

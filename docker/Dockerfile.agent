@@ -12,7 +12,7 @@ FROM python:3.12-slim
 # NOTA v1 (Opción B): el agente NO lanza contenedores (sin DinD). GitHub-MCP y
 # render llegan en v1.1 como servicios HERMANOS de red. Cero acceso al Docker host.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        build-essential git curl ca-certificates \
+        build-essential git curl ca-certificates postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
 # uv (gestor de paquetes/entorno, mismo que en el server)
@@ -38,19 +38,24 @@ RUN uv pip install --system --no-cache \
         "sentence-transformers>=5" "transformers>=5" \
         "scikit-learn>=1.9" "hdbscan>=0.8" "numpy>=2"
 
-# 3) Copiar el código completo (cambia seguido → capa final, no invalida deps).
+# 3) Modelo BGE-M3 HORNEADO vía COPY de la caché local (docker/model-cache/) — NO se
+#    descarga de internet en el build (la red del server es inestable y 2.3GB se cuelgan).
+#    La caché se extrajo una vez de una imagen previa. ANTES del COPY del código → un
+#    cambio de código NO invalida esta capa. Para refrescar el modelo: re-extraer la caché.
+COPY docker/model-cache/huggingface /root/.cache/huggingface
+RUN find /root/.cache/huggingface -name 'pytorch_model.bin' -delete 2>/dev/null || true
+
+# 4) Copiar el código completo AL FINAL (cambia seguido → capa última, no invalida
+#    ni las deps ni el modelo de arriba).
 COPY packages/ packages/
 
-# 4) Pre-descargar el modelo de embeddings BGE-M3 EN EL BUILD (no en el 1er arranque,
-#    que tardaría ~160s la primera vez del tester). Queda horneado en la imagen.
-#    Luego borra el pytorch_model.bin DUPLICADO (~2.2GB): se usa model.safetensors,
-#    el .bin es la copia vieja redundante → ahorra ~2GB en la imagen.
-RUN python -c "from sentence_transformers import SentenceTransformer; \
-    SentenceTransformer('BAAI/bge-m3')" \
-    && find /root/.cache/huggingface -name 'pytorch_model.bin' -delete 2>/dev/null || true
-
+# BUG-10: el modelo BGE-M3 ya esta HORNEADO en la imagen. Forzar modo OFFLINE de
+# HuggingFace/transformers para que NUNCA toque internet al cargar (la red del
+# server es inestable; sin esto, un parpadeo de red tumba la precarga de embeddings).
 ENV PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/app/packages/for3s-core/src
+    PYTHONPATH=/app/packages/for3s-core/src \
+    HF_HUB_OFFLINE=1 \
+    TRANSFORMERS_OFFLINE=1
 
 # El comando lo define el docker-compose (bot o worker). Default: el bot.
 CMD ["python", "-m", "for3s_core.telegram_channel"]

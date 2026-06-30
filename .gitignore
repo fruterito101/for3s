@@ -11,6 +11,9 @@ secrets/
 .for3s/
 *.bak
 *.bak-*
+*.bak2
+*.bak[0-9]
+*.bak.*
 
 # ─── Cerebro documental privado — NO es parte del producto ───
 Mente/
@@ -40,3 +43,4 @@ for3s-backups*/
 .DS_Store
 .idea/
 .vscode/
+docker/model-cache/

@@ -61,9 +61,62 @@ MICROGLIA_CONFIRMAR = os.environ.get("FOR3S_MICROGLIA_CONFIRMAR", "false").strip
 HORA_BACKUP_UTC = 7  # 01:00 México (ANTES de CLS, red de seguridad)
 HORA_CLS_UTC = 8  # 02:00 México
 HORA_STATUS_UTC = 8  # 02:30 México (AI4, justo DESPUÉS de CLS — usa minute=30)
+HORA_RELEVANCE_UTC = 8  # 02:45 México (recalcula decay ANTES de Microglía)
 HORA_MICROGLIA_UTC = 9  # 03:00 México
 HORA_CURAR_SKILLS_UTC = 9  # 03:30 México (DESPUÉS de Microglía — usa minute=30)
 HORA_DMN_NOCHE_UTC = 10  # 04:00 México (H9 DMN nocturno — DESPUÉS de la curación)
+HORA_HEALTH_UTC = 10  # 04:30 México (health check, tras todos los jobs — usa minute=30)
+
+
+import functools  # noqa: E402
+import time as _time  # noqa: E402
+
+
+def registra_corrida(nombre: str):
+    """Decorador para jobs nocturnos: registra cada corrida en cron_corridas
+    (job, ok, resultado, ms, creado_at) — PR2.2a. Así /salud nocturno y las alertas
+    saben CUÁNDO corrió cada job y con qué resultado, no solo los logs efímeros.
+    Defensivo: si el registro falla, NO rompe el job (el job es lo importante)."""
+
+    def deco(fn):
+        @functools.wraps(fn)
+        async def wrapper(ctx: dict) -> str:
+            t0 = _time.monotonic()
+            ok = True
+            try:
+                msg = await fn(ctx)
+            except Exception as e:  # noqa: BLE001 — relanzar tras registrar
+                ok = False
+                msg = f"{nombre} EXCEPCIÓN: {type(e).__name__}"
+                await _registrar_corrida(nombre, False, msg, int((_time.monotonic() - t0) * 1000))
+                raise
+            # heurística: si el msg dice "error", marcar ok=False
+            if isinstance(msg, str) and "error" in msg.lower():
+                ok = False
+            await _registrar_corrida(nombre, ok, str(msg)[:500], int((_time.monotonic() - t0) * 1000))
+            return msg
+
+        return wrapper
+
+    return deco
+
+
+async def _registrar_corrida(job: str, ok: bool, resultado: str, ms: int) -> None:
+    """Inserta una corrida en cron_corridas. Defensivo (un fallo de registro no
+    tumba el worker)."""
+    pool = None
+    try:
+        pool = await _get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "INSERT INTO cron_corridas (job, ok, resultado, ms) VALUES ($1, $2, $3, $4)",
+                job, ok, resultado, ms,
+            )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[cron_corridas] no pude registrar %s: %s", job, type(e).__name__)
+    finally:
+        if pool is not None:
+            await pool.close()
 
 
 async def _get_pool():
@@ -84,6 +137,7 @@ async def ping(ctx: dict) -> str:
     return msg
 
 
+@registra_corrida("cls")
 async def job_cls(ctx: dict) -> str:
     """Job nocturno CLS (2 AM México): consolida episodios pendientes → conceptos
     al Knowledge Graph. Defensivo: si falla, loguea pero no tumba el worker."""
@@ -107,6 +161,7 @@ async def job_cls(ctx: dict) -> str:
             await pool.close()
 
 
+@registra_corrida("status")
 async def job_status(ctx: dict) -> str:
     """Job nocturno STATUS (2:30 AM México, DESPUÉS de CLS): regenera el STATUS
     curado de cada hilo activo (AI4 auto-retomar). Defensivo: un STATUS fallido no
@@ -135,6 +190,46 @@ async def job_status(ctx: dict) -> str:
             await pool.close()
 
 
+@registra_corrida("relevance")
+async def job_relevance(ctx: dict) -> str:
+    """Job nocturno RELEVANCE (2:45 AM México, ANTES de Microglía): recalcula la
+    columna `relevance` (decay por desuso + refuerzo por uso) de TODAS las sesiones
+    con memoria embebida — no solo el dueño. Sin esto, relevance queda congelada/NULL
+    y la Microglía nunca encuentra candidatos (BUG-1). Defensivo: un fallo no tumba
+    el worker; cada sesión en su try para que una mala no frene a las demás."""
+    from for3s_core import relevance
+
+    pool = None
+    try:
+        pool = await _get_pool()
+        # sesiones con al menos un turno vivo y embebido (las de test sin embedding
+        # se saltan solas). Recalcular por sesión (la función opera por session_id).
+        rows = await pool.fetch(
+            "SELECT DISTINCT session_id FROM episodes_events "
+            "WHERE deleted_at IS NULL AND embedding IS NOT NULL"
+        )
+        total_sesiones = 0
+        total_filas = 0
+        for r in rows:
+            sid = r["session_id"]
+            try:
+                n = await relevance.recalcular_relevance_lote(pool, sid)
+                total_filas += n
+                total_sesiones += 1
+            except Exception as e:  # noqa: BLE001 — una sesión mala no frena las demás
+                logger.warning("[job_relevance] sesión %s falló: %s", sid, type(e).__name__)
+        msg = f"relevance recalculada: {total_sesiones} sesiones, {total_filas} turnos"
+        logger.info("[job_relevance] %s", msg)
+        return msg
+    except Exception as e:  # noqa: BLE001 — un fallo nocturno no tumba el worker
+        logger.exception("[job_relevance] falló: %s", type(e).__name__)
+        return f"relevance error: {type(e).__name__}"
+    finally:
+        if pool is not None:
+            await pool.close()
+
+
+@registra_corrida("microglia")
 async def job_microglia(ctx: dict) -> str:
     """Job nocturno Microglía (3 AM México, DESPUÉS de CLS): evalúa el olvido.
     Por defecto DRY-RUN (solo reporta). Borra de verdad solo si MICROGLIA_CONFIRMAR.
@@ -157,6 +252,7 @@ async def job_microglia(ctx: dict) -> str:
             await pool.close()
 
 
+@registra_corrida("backup")
 async def job_backup(ctx: dict) -> str:
     """Job nocturno de backup (1 AM México, ANTES de CLS): pg_dump verificado +
     rotación de los viejos. Es la red de seguridad antes del olvido. Defensivo."""
@@ -174,6 +270,7 @@ async def job_backup(ctx: dict) -> str:
         return f"backup error: {type(e).__name__}"
 
 
+@registra_corrida("curar_skills")
 async def job_curar_skills(ctx: dict) -> str:
     """Job nocturno de curación de skills (H12 P3, 3:30 AM México, DESPUÉS de
     Microglía): las skills AUTO sin uso se degradan poco a poco (active→stale→
@@ -195,6 +292,7 @@ async def job_curar_skills(ctx: dict) -> str:
             await pool.close()
 
 
+@registra_corrida("dmn_noche")
 async def job_dmn_noche(ctx: dict) -> str:
     """DMN nocturno (H9, 04:00 México, DESPUÉS de la curación): corre TODAS las tasks
     del DMN (incluidas las pesadas, solo_noche=True) — idle garantizado de madrugada.
@@ -242,6 +340,90 @@ async def job_dmn_idle(ctx: dict) -> str:
 
 
 # --- Worker settings (Arq lee esta clase) ----------------------------------
+async def _alertar_dueno(texto: str) -> bool:
+    """Envía una alerta al dueño por Telegram (worker → API Telegram). Lee el
+    owner_id del telegram_owner.json (montado) + el bot token (cifrado, KEK).
+    Defensivo: si algo falta, NO rompe (devuelve False). PR2.2b."""
+    import json as _json
+
+    from for3s_core import db as _db
+    from for3s_core.config import load_settings as _ls
+    from for3s_core.secret_store import SecretStore as _SS
+
+    # owner_id del json (cwd=/app → /app/.for3s, montado)
+    owner = None
+    for cand in (Path.cwd() / ".for3s" / "telegram_owner.json",
+                 Path("/app/.for3s/telegram_owner.json"),
+                 Path("/root/.for3s/telegram_owner.json")):
+        try:
+            if cand.exists():
+                owner = _json.loads(cand.read_text()).get("owner_id")
+                break
+        except Exception:  # noqa: BLE001
+            continue
+    if owner is None:
+        logger.warning("[alerta] no encuentro owner_id → no alerto")
+        return False
+
+    pool = None
+    try:
+        s = _ls()
+        pool = await _get_pool()
+        tok = await _SS(pool).get_secret(s.owner_session, "telegram_bot_token")
+        if not tok:
+            logger.warning("[alerta] sin bot token → no alerto")
+            return False
+        import httpx
+
+        async with httpx.AsyncClient(timeout=10) as cli:
+            r = await cli.post(
+                f"https://api.telegram.org/bot{tok}/sendMessage",
+                json={"chat_id": owner, "text": texto},
+            )
+        return r.status_code == 200
+    except Exception as e:  # noqa: BLE001 — una alerta fallida no tumba el worker
+        logger.warning("[alerta] fallo el envio: %s", type(e).__name__)
+        return False
+    finally:
+        if pool is not None:
+            await pool.close()
+
+
+@registra_corrida("health_check")
+async def job_health_check(ctx: dict) -> str:
+    """Job nocturno (4:30 AM Mx, tras todos los demás): corre el reporte de salud
+    completo y, SI hay 🔴 FALLAS (no avisos), ALERTA al dueño por Telegram. PR2.2b.
+    Es lo que hace que un subsistema roto NO pase desapercibido (la lección de los 9
+    bugs de la contenerización). Defensivo: un fallo aquí no tumba el worker."""
+    from for3s_core import health
+
+    pool = None
+    try:
+        pool = await _get_pool()
+        reporte = await health.reporte_completo(pool)
+        n_fail = reporte.count("🔴")
+        if n_fail > 0:
+            # extraer SOLO las líneas con 🔴 para una alerta concisa
+            fallas = [ln.strip() for ln in reporte.split("\n") if "🔴" in ln]
+            alerta = (
+                f"🚨 *For3s OS: {n_fail} problema(s) de salud detectados*\n\n"
+                + "\n".join(fallas[:15])
+                + "\n\nUsa /salud para el reporte completo."
+            )
+            enviado = await _alertar_dueno(alerta)
+            msg = f"health_check: {n_fail} fallas → alerta {'enviada' if enviado else 'NO enviada'}"
+        else:
+            msg = "health_check: todo OK (sin alerta)"
+        logger.info("[job_health_check] %s", msg)
+        return msg
+    except Exception as e:  # noqa: BLE001
+        logger.exception("[job_health_check] falló: %s", type(e).__name__)
+        return f"health_check error: {type(e).__name__}"
+    finally:
+        if pool is not None:
+            await pool.close()
+
+
 class WorkerSettings:
     """Configuración que Arq usa para levantar el worker.
 
@@ -253,19 +435,23 @@ class WorkerSettings:
         ping,
         job_cls,
         job_status,
+        job_relevance,
         job_microglia,
         job_backup,
         job_curar_skills,
         job_dmn_noche,
+        job_health_check,
         job_dmn_idle,
     ]
     cron_jobs = [
         cron(job_backup, hour=HORA_BACKUP_UTC, minute=0),  # 01:00 México (1º)
         cron(job_cls, hour=HORA_CLS_UTC, minute=0),  # 02:00 México
         cron(job_status, hour=HORA_STATUS_UTC, minute=30),  # 02:30 México (AI4)
+        cron(job_relevance, hour=HORA_RELEVANCE_UTC, minute=45),  # 02:45 México (decay, BUG-1)
         cron(job_microglia, hour=HORA_MICROGLIA_UTC, minute=0),  # 03:00 México
         cron(job_curar_skills, hour=HORA_CURAR_SKILLS_UTC, minute=30),  # 03:30 México (H12 P3)
         cron(job_dmn_noche, hour=HORA_DMN_NOCHE_UTC, minute=0),  # 04:00 México (H9, todas)
+        cron(job_health_check, hour=HORA_HEALTH_UTC, minute=30),  # 04:30 México (PR2.2b alerta)
         cron(job_dmn_idle, minute={0, 30}),  # H9: cada 30 min, corre solo si está idle (ligeras)
     ]
 

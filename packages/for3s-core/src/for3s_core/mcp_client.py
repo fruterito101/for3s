@@ -1,74 +1,74 @@
 # For3s OS — Copyright (c) 2026 Brian Jovany López Pérez. Licencia AGPL-3.0 (ver LICENSE).
-"""Cliente MCP de For3s OS — puente con el GitHub MCP server (Paso 3 migración).
+"""Cliente MCP de For3s OS — puente con servidores MCP HERMANOS de red (v1.1).
 
-Gestiona la sesión con el GitHub MCP server oficial (contenedor Docker, stdio,
-read-only en el MVP). Expone:
-  • tools_for_anthropic() → las tools en formato {name, description, input_schema}
-    listo para pasarlas a Claude (Messages API).
+ANTES (v1): el bot lanzaba el GitHub MCP server con `docker run ... stdio`. Pero el
+bot ahora vive DENTRO de un contenedor SIN acceso al Docker host (decisión sin-DinD
+de Brian) → `docker run` fallaba con FileNotFoundError (BUG-9).
+
+AHORA (v1.1 — HERMANOS DE RED): el GitHub MCP server corre como un SERVICIO HERMANO
+en el docker-compose (modo `http`, puerto 8082). El bot se conecta por HTTP a
+`http://github-mcp:8082/mcp` (DNS interno de la red for3s_net). Cero acceso al Docker
+host → se mantiene el diseño de seguridad. El PAT de GitHub viaja en el header
+`Authorization: Bearer <PAT>` de cada conexión (el server HTTP autentica por request,
+NO por env var) — compatible con la KEK y con el futuro multi-usuario (PAT por persona).
+
+Expone (interfaz IDÉNTICA a la v1, los call sites no cambian):
+  • tools_for_anthropic() → tools en formato Anthropic {name, description, input_schema}
   • call_tool(name, args) → ejecuta la tool vía MCP y devuelve el texto del result.
 
-El PAT de GitHub se inyecta al contenedor en runtime (NO en .env, NO en texto
-plano) — fiel a R4. read-only en el MVP: solo las 21 tools de lectura.
-
-Diseño: la sesión MCP vive mientras el bot corre (se abre en start(), se cierra
-en aclose()). asyncio nativo, convive con python-telegram-bot.
+Diseño: la sesión MCP vive mientras el bot corre (start() → aclose()). asyncio nativo.
 """
 
 from __future__ import annotations
 
 import logging
+import os
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 from typing import Any
 
-from mcp import ClientSession, StdioServerParameters
-from mcp.client.stdio import stdio_client
+from mcp import ClientSession
+from mcp.client.streamable_http import streamablehttp_client
 
 logger = logging.getLogger("for3s.mcp")
 
 # Toolsets de lectura para el MVP (R4: GitHub crítico; aquí solo read).
 _MVP_TOOLSETS = "issues,pull_requests,repos"
 
+# URL del hermano GitHub MCP (servicio del compose). Override por env para otros
+# despliegues. El path /mcp es el endpoint estándar del modo streamable-http.
+GITHUB_MCP_URL = os.environ.get("FOR3S_GITHUB_MCP_URL", "http://github-mcp:8082/mcp")
 
-# P4 — MCP GENÉRICO + CONFIG: For3s puede conectar CUALQUIER servidor MCP, no solo
-# GitHub. Un servidor se declara con una config (comando que lo arranca + env), y
-# MCPClient lo gestiona igual para todos. GitHub pasa a ser "el primer MCP
-# configurado" (ver config_github). Enchufar otro = crear otra MCPServerConfig.
+
+# P4 — MCP GENÉRICO + CONFIG: For3s puede conectar CUALQUIER servidor MCP por HTTP.
+# Un servidor se declara con una config (URL + headers), y MCPClient lo gestiona
+# igual para todos. GitHub = "el primer MCP configurado" (ver config_github).
 @dataclass
 class MCPServerConfig:
-    """Declaración de un servidor MCP: cómo arrancarlo y qué nombre tiene."""
+    """Declaración de un servidor MCP HERMANO: su URL y los headers (auth)."""
 
     nombre: str  # id legible (ej. "github")
-    command: str  # binario que lo lanza (ej. "docker", "npx")
-    args: list[str] = field(default_factory=list)
-    env: dict[str, str] = field(default_factory=dict)
+    url: str  # endpoint http del server hermano (ej. http://github-mcp:8082/mcp)
+    headers: dict[str, str] = field(default_factory=dict)
 
 
 def config_github(pat: str, *, read_only: bool = True) -> MCPServerConfig:
-    """Config del MCP de GitHub (el primer/único server por ahora). Misma invocación
-    que el cliente GitHub hardcodeado tenía — comportamiento idéntico."""
-    args = [
-        "run",
-        "-i",
-        "--rm",
-        "-e",
-        "GITHUB_PERSONAL_ACCESS_TOKEN",
-        "ghcr.io/github/github-mcp-server",
-        "stdio",
-        "--toolsets",
-        _MVP_TOOLSETS,
-    ]
-    if read_only:
-        args.append("--read-only")
+    """Config del MCP de GitHub HERMANO (HTTP). El PAT va en el header Authorization
+    (el server http autentica por request). `read_only` lo fija el contenedor hermano
+    al arrancar (`http --read-only` en el compose), no el cliente — aquí se conserva
+    el parámetro por compat de firma. Para writes se usa otro hermano (ver
+    GITHUB_MCP_WRITE_URL en ejecutar_write)."""
     return MCPServerConfig(
-        nombre="github", command="docker", args=args, env={"GITHUB_PERSONAL_ACCESS_TOKEN": pat}
+        nombre="github",
+        url=GITHUB_MCP_URL,
+        headers={"Authorization": f"Bearer {pat}"},
     )
 
 
 class MCPClient:
-    """Sesión persistente con CUALQUIER servidor MCP (stdio), desde una
-    MCPServerConfig. Genérico: GitHub, filesystem, Slack, etc. usan el mismo
-    cliente. start/aclose/tools_for_anthropic/call_tool idénticos para todos."""
+    """Sesión persistente con CUALQUIER servidor MCP HERMANO (HTTP streamable),
+    desde una MCPServerConfig. Genérico: GitHub, etc. usan el mismo cliente.
+    start/aclose/tools_for_anthropic/call_tool idénticos para todos."""
 
     def __init__(self, config: MCPServerConfig) -> None:
         self._cfg = config
@@ -81,20 +81,21 @@ class MCPClient:
         return self._cfg.nombre
 
     async def start(self) -> None:
-        """Lanza el servidor MCP y abre la sesión. Idempotente."""
+        """Abre la sesión HTTP con el server MCP hermano. Idempotente. Lanza si el
+        hermano no responde (el caller lo captura y degrada a sin-GitHub)."""
         if self._session is not None:
             return
-        server = StdioServerParameters(
-            command=self._cfg.command, args=self._cfg.args, env=self._cfg.env
-        )
         self._stack = AsyncExitStack()
-        read, write = await self._stack.enter_async_context(stdio_client(server))
+        # streamablehttp_client devuelve (read, write, get_session_id)
+        read, write, _ = await self._stack.enter_async_context(
+            streamablehttp_client(self._cfg.url, headers=self._cfg.headers)
+        )
         self._session = await self._stack.enter_async_context(ClientSession(read, write))
         await self._session.initialize()
 
     async def aclose(self) -> None:
-        """Cierra la sesión y baja el server. DEFENSIVO: cerrar desde otra tarea
-        (anyio cancel scope) lanza RuntimeError — no explota, suelta referencias."""
+        """Cierra la sesión. DEFENSIVO: cerrar desde otra tarea (anyio cancel scope)
+        lanza RuntimeError — no explota, suelta referencias."""
         if self._stack is not None:
             try:
                 await self._stack.aclose()
@@ -135,52 +136,39 @@ class MCPClient:
 
 
 class GitHubMCPClient(MCPClient):
-    """GitHub MCP server (Docker stdio, read-only). Ahora es un caso del MCPClient
-    GENÉRICO (P4): GitHub = el primer MCP configurado. Mantiene la firma
-    __init__(pat, read_only=) para compat total con los call sites existentes.
-    Toda la lógica (start/aclose/tools/call_tool) vive en MCPClient."""
+    """GitHub MCP server HERMANO (HTTP, read-only). Es un caso del MCPClient genérico
+    (P4): GitHub = el primer MCP configurado. Mantiene la firma __init__(pat,
+    read_only=) para compat total con los call sites existentes."""
 
     def __init__(self, pat: str, *, read_only: bool = True) -> None:
         super().__init__(config_github(pat, read_only=read_only))
 
 
+# URL del hermano GitHub MCP WRITE-capable (servicio aparte del compose, SIN
+# --read-only). Solo se usa para writes ya confirmadas por el usuario.
+GITHUB_MCP_WRITE_URL = os.environ.get(
+    "FOR3S_GITHUB_MCP_WRITE_URL", "http://github-mcp-write:8082/mcp"
+)
+
+
 async def ejecutar_write(pat: str, name: str, args: dict[str, Any]) -> str:
-    """Ejecuta UNA write tool en un contenedor MCP EFÍMERO write-capable
-    (2026-06-18, write tools con confirmación).
+    """Ejecuta UNA write tool vía el hermano GitHub MCP WRITE-capable (HTTP).
 
-    Diseño de seguridad (defense in depth):
-      • El cliente de LECTURA del bot sigue corriendo read-only SIEMPRE.
-      • La escritura usa un contenedor APARTE, write-capable, que se levanta
-        SOLO para esta llamada (ya confirmada por el usuario con botón) y se
-        cierra al terminar. El MCP write NO queda vivo esperando → menor
-        superficie de ataque.
-      • Levanta su propia sesión (stdio) y la cierra en el mismo task → no hay
-        el problema de 'cancel scope in a different task'.
+    Diseño de seguridad (defense in depth), igual que en v1 pero por red:
+      • El cliente de LECTURA del bot apunta al hermano read-only SIEMPRE.
+      • La escritura usa OTRO hermano (github-mcp-write, SIN --read-only), separado.
+      • La whitelist dura del tool_loop (WRITE_TOOLS) garantiza que `name` es una
+        write segura permitida; aquí ya llega validada y confirmada por el usuario.
+      • Abre y cierra la sesión en el mismo task → sin 'cancel scope in another task'.
 
-    Devuelve el resultado como texto. Lanza la excepción si la tool falla (el
-    caller la captura para avisar al usuario).
+    Devuelve el resultado como texto. Lanza la excepción si la tool falla (el caller
+    la captura para avisar al usuario).
     """
-    args_run = [
-        "run",
-        "-i",
-        "--rm",
-        "-e",
-        "GITHUB_PERSONAL_ACCESS_TOKEN",
-        "ghcr.io/github/github-mcp-server",
-        "stdio",
-        "--toolsets",
-        _MVP_TOOLSETS,
-        # SIN --read-only: este contenedor sí puede escribir. La whitelist dura
-        # del tool_loop (WRITE_TOOLS) es la que garantiza que `name` es una write
-        # segura permitida; aquí ya llega validado y confirmado por el usuario.
-    ]
-    server = StdioServerParameters(
-        command="docker",
-        args=args_run,
-        env={"GITHUB_PERSONAL_ACCESS_TOKEN": pat},
-    )
+    headers = {"Authorization": f"Bearer {pat}"}
     async with AsyncExitStack() as stack:
-        read, write = await stack.enter_async_context(stdio_client(server))
+        read, write, _ = await stack.enter_async_context(
+            streamablehttp_client(GITHUB_MCP_WRITE_URL, headers=headers)
+        )
         session = await stack.enter_async_context(ClientSession(read, write))
         await session.initialize()
         result = await session.call_tool(name, args)

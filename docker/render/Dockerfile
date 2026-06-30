@@ -7,4 +7,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends python3-pip \
     && rm -rf /var/lib/apt/lists/*
 RUN pip install --break-system-packages --no-cache-dir playwright==1.60.0
 COPY render.py /render.py
-ENTRYPOINT ["python3", "/render.py"]
+COPY render_http.py /render_http.py
+EXPOSE 8080
+# v1.1 BUG-9b: corre como SERVICIO HTTP hermano (no docker run por disparo).
+# El bot le pide GET http://render:8080/?url=...
+CMD ["python3", "/render_http.py"]

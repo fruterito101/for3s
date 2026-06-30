@@ -72,6 +72,7 @@ logger = logging.getLogger("for3s.telegram")
 # al lado del comando en el menú.
 _MENU_BASICO = [
     BotCommand("start", "Iniciar y ver qué puedo hacer"),
+    BotCommand("ayuda", "❓ Qué puedo hacer y cómo resolver problemas"),
     BotCommand("cupo", "Ver cuánto queda de la suscripción"),
     BotCommand("estado", "Salud del agente (uptime, modelo)"),
     BotCommand("version", "Versión, hito y novedades de For3s"),
@@ -88,7 +89,10 @@ _MENU_ADMIN = _MENU_BASICO + [
     BotCommand("dmn", "🌙 DMN: trabaja solo cuando estás inactivo"),
     BotCommand("invitar", "🚪 Abrir o cerrar la puerta del equipo"),
     BotCommand("miembros", "Ver quién está en el equipo"),
+    BotCommand("salud", "🩺 Salud completa del sistema (PR2)"),
+    BotCommand("datos", "📊 Analítica de uso (PR3)"),
     BotCommand("diagnostico", "Mini-reporte de actividad reciente"),
+    BotCommand("reconectar", "🔌 Reconectar y verificar integraciones"),
     BotCommand("reiniciar", "Reinicio suave (reconecta GitHub)"),
     BotCommand("reiniciar_duro", "Reinicio completo del proceso"),
 ]
@@ -318,12 +322,22 @@ class CupoPinStore:
 
 
 class OwnerStore:
-    """Guarda quién es el dueño del bot (el primer /start). Fail-closed."""
+    """Guarda quién es el dueño del bot (el primer /start). Fail-closed.
+
+    PR6.1 (BUG-4): la BD es la FUENTE DE VERDAD del owner (tabla `owner`), porque la
+    BD siempre está montada y viaja con los backups — a diferencia del JSON en cwd que
+    rompió la migración ("Foresito olvidó todo"). El JSON queda como caché/compat. Hay
+    un CACHÉ en memoria (`_cache`) para no leer disco en las ~18 llamadas por turno.
+
+    Orden de verdad: caché memoria → (en setup) BD → JSON. get_owner() es síncrono
+    (compat con las 18 llamadas); sync_con_bd() se llama 1 vez en setup() para cargar
+    el owner de la BD a la caché + reparar el JSON si hace falta."""
 
     def __init__(self, path: Path) -> None:
         self._path = path
+        self._cache: int | None = None  # PR6.1: owner cacheado en memoria
 
-    def get_owner(self) -> int | None:
+    def _leer_json(self) -> int | None:
         try:
             data = json.loads(self._path.read_text(encoding="utf-8"))
             owner = data.get("owner_id")
@@ -331,10 +345,130 @@ class OwnerStore:
         except (FileNotFoundError, ValueError, json.JSONDecodeError):
             return None
 
-    def set_owner(self, user_id: int) -> None:
+    def get_owner(self) -> int | None:
+        # 1º la caché (rápido, robusto); 2º el JSON (fallback). La BD se sincronizó
+        # a la caché en setup() — por eso get_owner sigue siendo síncrono.
+        if self._cache is not None:
+            return self._cache
+        owner = self._leer_json()
+        if owner is not None:
+            self._cache = owner
+        return owner
+
+    async def sync_con_bd(self, pool) -> None:
+        """PR6.1: en setup(), la BD manda. Carga el owner de la tabla `owner` a la
+        caché y, si el JSON está desincronizado/ausente, lo repara. Defensivo: si la
+        BD falla, cae al JSON (no peor que antes). Esto CIERRA BUG-4: aunque el JSON
+        se pierda (migración), el owner se recupera de la BD."""
+        try:
+            async with pool.acquire() as conn:
+                row = await conn.fetchval(
+                    "SELECT owner_id FROM owner WHERE workspace = 'default'"
+                )
+            if row is not None:
+                self._cache = int(row)
+                # reparar el JSON si no coincide (compat con código que lo lea directo)
+                if self._leer_json() != self._cache:
+                    self._escribir_json(self._cache)
+                logger.info("[owner] cargado de la BD: %s (fuente de verdad)", self._cache)
+                return
+            # la BD no tiene owner aún: si el JSON sí, migrarlo a la BD
+            json_owner = self._leer_json()
+            if json_owner is not None:
+                async with pool.acquire() as conn:
+                    await conn.execute(
+                        "INSERT INTO owner (workspace, owner_id) VALUES ('default', $1) "
+                        "ON CONFLICT (workspace) DO UPDATE SET owner_id=EXCLUDED.owner_id",
+                        json_owner,
+                    )
+                self._cache = json_owner
+                logger.info("[owner] migrado JSON→BD: %s", json_owner)
+        except Exception as e:  # noqa: BLE001 — si la BD falla, seguimos con el JSON
+            logger.warning("[owner] sync_con_bd falló (uso JSON): %s", type(e).__name__)
+            self._cache = self._leer_json()
+
+    def _escribir_json(self, user_id: int) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._path.write_text(json.dumps({"owner_id": user_id}), encoding="utf-8")
         self._path.chmod(0o600)
+
+    def set_owner(self, user_id: int) -> None:
+        # escribe JSON + caché; la BD se actualiza en set_owner_bd (async, desde setup/start)
+        self._escribir_json(user_id)
+        self._cache = user_id
+
+    async def set_owner_bd(self, pool, user_id: int) -> None:
+        """Persiste el owner en la BD (fuente de verdad) + JSON + caché. PR6.1."""
+        self.set_owner(user_id)
+        try:
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    "INSERT INTO owner (workspace, owner_id) VALUES ('default', $1) "
+                    "ON CONFLICT (workspace) DO UPDATE SET owner_id=EXCLUDED.owner_id, "
+                    "actualizado_at=now()",
+                    user_id,
+                )
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[owner] set_owner_bd falló (queda en JSON): %s", type(e).__name__)
+
+    async def transferir(self, pool, nuevo_owner_id: int) -> tuple[bool, str]:
+        """PR6.2a: transferir el dueño a otra persona, de forma ATÓMICA en los 3
+        lugares que importan, para no DESINCRONIZAR (bug entre componentes):
+          1. tabla `owner` (la fuente de verdad)
+          2. `equipos.encargado_id` (el equipo del viejo owner → pasa al nuevo, si existe;
+             sin esto, la PUERTA del equipo dejaría de funcionar para el nuevo dueño)
+          3. JSON + caché en memoria
+        Todo en UNA transacción: o los 3 o ninguno (rollback). Devuelve (ok, motivo)."""
+        viejo = self.get_owner()
+        if nuevo_owner_id == viejo:
+            return False, "ya_es_dueno"
+        try:
+            async with pool.acquire() as conn:
+                async with conn.transaction():
+                    # 1. owner (fuente de verdad)
+                    await conn.execute(
+                        "INSERT INTO owner (workspace, owner_id) VALUES ('default', $1) "
+                        "ON CONFLICT (workspace) DO UPDATE SET owner_id=EXCLUDED.owner_id, "
+                        "actualizado_at=now()",
+                        nuevo_owner_id,
+                    )
+                    # 2. encargado del equipo del viejo owner → al nuevo (si existe equipo)
+                    if viejo is not None:
+                        await conn.execute(
+                            "UPDATE equipos SET encargado_id=$1 WHERE encargado_id=$2",
+                            nuevo_owner_id,
+                            viejo,
+                        )
+            # 3. JSON + caché (fuera de la transacción de BD, ya commiteada)
+            self.set_owner(nuevo_owner_id)
+            logger.info("[owner] TRANSFERIDO %s → %s (atómico)", viejo, nuevo_owner_id)
+            return True, "ok"
+        except Exception as e:  # noqa: BLE001 — si falla, la transacción hizo rollback
+            logger.exception("[owner] transferir falló (rollback): %s", type(e).__name__)
+            return False, f"error: {type(e).__name__}"
+
+    async def recuperar(self, pool) -> tuple[bool, str]:
+        """PR6.2b: re-sincroniza owner ↔ encargado ↔ JSON desde la BD (fuente de
+        verdad). Red de seguridad si algo se desincronizó. Devuelve (ok, owner_id)."""
+        try:
+            async with pool.acquire() as conn:
+                row = await conn.fetchval(
+                    "SELECT owner_id FROM owner WHERE workspace='default'"
+                )
+                if row is None:
+                    return False, "sin owner en BD"
+                owner = int(row)
+                # re-alinear el encargado del equipo con el owner de la BD
+                await conn.execute(
+                    "UPDATE equipos SET encargado_id=$1 WHERE encargado_id <> $1",
+                    owner,
+                )
+            self.set_owner(owner)  # JSON + caché
+            logger.info("[owner] recuperado de la BD: %s (re-sincronizado)", owner)
+            return True, str(owner)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[owner] recuperar falló: %s", type(e).__name__)
+            return False, f"error: {type(e).__name__}"
 
     def is_authorized(self, user_id: int | None) -> bool:
         """FAIL-CLOSED: sin dueño registrado o sin user_id → denegado."""
@@ -444,6 +578,7 @@ class TelegramChannel:
         self._owner_session = owner_session
         self._pins = pin_store
         self._pool = None
+        self._transfer_pendiente: int | None = None  # PR6.2a
         self._agent: Agent | None = None
         self._mcp: GitHubMCPClient | None = None  # sesión MCP GitHub (Paso 4-6)
         self._started_at: float = time.time()  # para /estado (uptime)
@@ -491,6 +626,9 @@ class TelegramChannel:
         settings = load_settings()
         self._pool = await db.connect(settings.database_url)
         await db.apply_migrations(self._pool)
+        # PR6.1 (BUG-4): la BD es la fuente de verdad del owner. Cargar a la caché +
+        # reparar el JSON si hace falta (así una migración no vuelve a "olvidar" al dueño).
+        await self._owners.sync_con_bd(self._pool)
         self._equipo = equipo_mod.EquipoStore(self._pool)  # H8 S10e (aditivo)
         self._temas = temas_mod.TemaStore(self._pool)  # AI2 temas (aditivo)
         provider = ClaudeProvider(
@@ -601,6 +739,20 @@ class TelegramChannel:
             return
         # Cualquier otro error: log con detalle (pero NO se propaga → bot vivo)
         logger.error("Error no manejado: %s", err, exc_info=err)
+        # PR10.3b: ADEMÁS de loguear, AVISAR al usuario (no dejarlo esperando en
+        # silencio). Solo si el update trae un mensaje al que responder. Defensivo:
+        # el propio aviso nunca debe causar otro error (de ahí el try y _responder_seguro).
+        try:
+            msg = getattr(update, "message", None) if isinstance(update, Update) else None
+            if msg is not None:
+                await _responder_seguro(
+                    msg,
+                    "❌ Algo falló de mi lado procesando eso (no fue tu mensaje). "
+                    "Ya quedó registrado. Reintenta; si sigue, el dueño puede usar "
+                    "/salud o /reconectar.",
+                )
+        except Exception:  # noqa: BLE001 — el aviso de error JAMÁS debe romper el handler
+            logger.warning("on_error: no pude avisar al usuario (no crítico)")
 
     async def on_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         user = update.effective_user
@@ -608,7 +760,7 @@ class TelegramChannel:
             return
         owner = self._owners.get_owner()
         if owner is None:
-            self._owners.set_owner(user.id)
+            await self._owners.set_owner_bd(self._pool, user.id)  # PR6.1: persiste en BD
             logger.info("dueño registrado: %s (%s)", user.id, user.full_name)
             await self._publicar_menu(context.bot, update.message.chat_id, user)
             await update.message.reply_text(
@@ -1170,13 +1322,80 @@ class TelegramChannel:
         # TODO multi-usuario: admitir también IDs con rol 'admin' explícito.
         return self._owners.is_authorized(user_id)
 
-    async def on_estado(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """/estado — salud rápida del agente (cero tokens)."""
+    async def on_datos(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """/datos — PR3: analítica de uso (actividad, consumo de tokens, repos
+        recurrentes, capacidades usadas, actividad por persona). Datos REALES, sin
+        inflar (cada métrica verificada). Solo el dueño."""
         msg, user = update.message, update.effective_user
         if msg is None or user is None:
             return
         if not self._es_admin(user.id):
             await msg.reply_text("⛔ Comando solo para el dueño.")
+            return
+        if self._pool is None:
+            await msg.reply_text("📊 Aún sin conexión a la BD.")
+            return
+        await msg.reply_text("📊 Calculando los datos de uso…")
+        try:
+            from for3s_core import analytics
+
+            reporte = await analytics.reporte_datos(self._pool)
+        except Exception as e:  # noqa: BLE001
+            await msg.reply_text(f"📊 Error generando los datos: {type(e).__name__}")
+            return
+        for i in range(0, len(reporte), 3900):
+            await msg.reply_text(reporte[i : i + 3900], parse_mode=ParseMode.MARKDOWN)
+
+    async def on_ayuda(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """/ayuda — PR10.1: qué es For3s, qué puede hacer, comandos SEGÚN EL ROL, y
+        cómo resolver problemas comunes. Para TODOS (dueño y miembros). Es el primer
+        auxilio para que el usuario no dependa de soporte humano."""
+        msg, user = update.message, update.effective_user
+        if msg is None or user is None:
+            return
+        es_admin = self._es_admin(user.id)
+
+        comunes = (
+            "*❓ ¿Qué es For3s?*\n"
+            "Tu segundo cerebro con memoria: conversa, recuerda lo que trabajan, lee "
+            "repos de GitHub, archivos (PDF/imágenes/Word/Excel) y páginas web.\n\n"
+            "*🗣️ Cómo usarme*\n"
+            "• Solo escríbeme — recuerdo nuestra conversación entre sesiones.\n"
+            "• Pregúntame *\"¿en qué quedamos?\"* para retomar.\n"
+            "• Pásame un link de GitHub y lo analizo; un PDF/imagen y lo leo.\n\n"
+            "*📋 Tus comandos*\n"
+            "• /start — empezar · /ayuda — esto\n"
+            "• /perfil — quién eres (rol, preferencias)\n"
+            "• /tema · /temas · /hilos — organizar tus conversaciones por tema\n"
+            "• /skills · /aprende — habilidades reutilizables\n"
+            "• /version — versión y novedades · /estado — salud del agente\n"
+            "• /cupo — cuánto queda de la suscripción\n"
+        )
+        admin = (
+            "\n*🛠️ Comandos de dueño*\n"
+            "• /salud — reporte completo de salud · /salud <sección>\n"
+            "• /diagnostico — actividad reciente · /model — elegir modelo IA\n"
+            "• /invitar — abrir/cerrar la puerta del equipo · /miembros\n"
+            "• /dmn — el modo \"sueña\" · /autogen — auto-generar skills\n"
+            "• /reiniciar — reconectar GitHub · /reiniciar_duro — reinicio total\n"
+        )
+        problemas = (
+            "\n*🩺 ¿Algo no funciona?*\n"
+            "• Si no respondo: la red del servidor puede estar inestable, reintenta en un momento.\n"
+            "• Si no recuerdo algo: pregúntame distinto o pega el contexto; mi memoria es por tema.\n"
+            "• Si GitHub/web falla: avísame e intento de nuevo (a veces el servicio externo se cae).\n"
+        )
+        if es_admin:
+            problemas += "• Dueño: usa /salud para ver qué subsistema falla, y /reiniciar si es GitHub.\n"
+
+        texto = comunes + (admin if es_admin else "") + problemas
+        await msg.reply_text(texto, parse_mode=ParseMode.MARKDOWN)
+
+    async def on_estado(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """/estado — salud rápida del agente (cero tokens). Abierto a todos (BUG-12):
+        es info no sensible (uptime/modelo) y estaba en el menú básico pero bloqueado."""
+        msg, user = update.message, update.effective_user
+        if msg is None or user is None:
             return
         up = int(time.time() - self._started_at)
         h, m = up // 3600, (up % 3600) // 60
@@ -1190,6 +1409,36 @@ class TelegramChannel:
             f"• {cupo}\n"
             f"• Activo desde hace: {h}h {m}m",
         )
+
+    async def on_salud(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """/salud — reporte de salud END-TO-END del sistema (PR2): la línea
+        mensaje→memoria, subsistemas, grafo, integraciones, ciclo nocturno, tokens
+        por persona, hilos. Solo el dueño. Defensivo."""
+        msg, user = update.message, update.effective_user
+        if msg is None or user is None:
+            return
+        if not self._es_admin(user.id):
+            await msg.reply_text("⛔ Comando solo para el dueño.")
+            return
+        if self._pool is None:
+            await msg.reply_text("🩺 Aún sin conexión a la BD.")
+            return
+        # /salud → reporte completo · /salud <seccion> → solo esa (linea, tokens,
+        # nocturno, grafo, integraciones, subsistemas, hilos) para no saturar.
+        seccion = (context.args[0] if context.args else "").strip().lower()
+        await msg.reply_text("🩺 Revisando la salud del sistema…")
+        try:
+            from for3s_core import health
+
+            if seccion:
+                reporte = await health.reporte_seccion(self._pool, seccion)
+            else:
+                reporte = await health.reporte_completo(self._pool)
+        except Exception as e:  # noqa: BLE001 — el reporte nunca debe romper
+            await msg.reply_text(f"🩺 Error generando el reporte: {type(e).__name__}")
+            return
+        for i in range(0, len(reporte), 3900):
+            await msg.reply_text(reporte[i : i + 3900], parse_mode=ParseMode.MARKDOWN)
 
     async def on_skills(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """/skills — H10: lista las skills (recetas) de For3s. `/skills <nombre>` muestra
@@ -2013,26 +2262,208 @@ class TelegramChannel:
         await msg.reply_text("\n".join(lineas), parse_mode=ParseMode.MARKDOWN)
 
     async def on_diagnostico(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """/diagnostico — mini-reporte: últimos turnos + tools recientes."""
+        """/diagnostico — PR10.2: auto-diagnóstico PERSONAL para CUALQUIER usuario.
+        Cada quien ve SU situación (rol, su hilo, su memoria, su perfil) — NUNCA la de
+        otro. ⭐ FIX BUG-13: antes leía siempre la sesión 'brian' del dueño (fuga); ahora
+        usa _sesion_de(user) (la sesión real de quien pregunta, respeta H8/AI1)."""
         msg, user = update.message, update.effective_user
         if msg is None or user is None:
             return
-        if not self._es_admin(user.id):
-            await msg.reply_text("⛔ Comando solo para el dueño.")
+        # autorización aditiva (dueño/miembro/puerta) — mismo gate que el resto
+        ok, motivo = await self._autorizar(user)
+        if not ok:
+            await msg.reply_text("⛔ Este bot es privado.")
             return
         if self._pool is None:
             await msg.reply_text("🩺 Aún sin conexión a la BD.")
             return
         from for3s_core import memory
 
-        turns = await memory.load_history(self._pool, self._owner_session, last_n=4)
-        lineas = ["🩺 *Diagnóstico rápido*", f"Últimos {len(turns)} turnos:"]
-        for t in turns:
-            quien = "👤" if t.role == "user" else "🤖"
-            lineas.append(f"{quien} {t.content[:60].replace(chr(10), ' ')}")
-        mcp = "✅" if self._mcp is not None else "❌"
-        lineas.append(f"\nGitHub MCP: {mcp} · modelo: {self._model}")
-        await msg.reply_text("\n".join(lineas))
+        es_admin = self._es_admin(user.id)
+        rol = "👑 dueño" if es_admin else "👤 miembro"
+        # la SESIÓN REAL del usuario (su hilo×tema), NO la fija del dueño (FIX BUG-13)
+        sesion = await self._sesion_de(user)
+
+        lineas = ["🩺 *Tu diagnóstico*", f"• Te reconozco como: {rol}"]
+
+        # ¿el bot te reconoce bien? (la prueba que destapó el bug de la migración)
+        if es_admin and self._owners.get_owner() != user.id:
+            lineas.append("⚠️ OJO: eres admin pero el owner_id no coincide (revisar)")
+
+        # TU memoria en TU hilo actual (no la de otro)
+        try:
+            turns = await memory.load_history(self._pool, sesion, last_n=4)
+            lineas.append(f"• Tu hilo actual: `{sesion}` ({len(turns)} turnos recientes)")
+            for tr in turns[-3:]:
+                quien = "👤" if tr.role == "user" else "🤖"
+                lineas.append(f"  {quien} {tr.content[:55].replace(chr(10), ' ')}")
+        except Exception:  # noqa: BLE001
+            lineas.append("• Tu memoria: no pude leerla ahora")
+
+        # TU perfil (si lo tienes)
+        try:
+            from for3s_core.perfil import PerfilStore
+
+            perfil = await PerfilStore(self._pool).get(user.id)
+            lineas.append(f"• Tu perfil: {'configurado' if perfil else 'sin configurar (usa /perfil)'}")
+        except Exception:  # noqa: BLE001
+            pass
+
+        # TUS hilos/temas
+        try:
+            if self._temas is not None:
+                hilos = await self._temas.resumen_hilos(user.id, self._base_sesion(user))
+                lineas.append(f"• Tus temas/hilos: {len(hilos)}")
+        except Exception:  # noqa: BLE001
+            pass
+
+        # estado de servicios (info no sensible, útil para saber si algo está caído)
+        mcp = "✅" if self._mcp is not None else "❌ (avísame para reconectar)"
+        lineas.append(f"\n*Servicios:* GitHub {mcp} · modelo {self._model}")
+        if es_admin:
+            lineas.append("Para salud completa del sistema usa /salud.")
+        else:
+            lineas.append("Si algo no funciona, escríbeme o usa /ayuda.")
+
+        await msg.reply_text("\n".join(lineas), parse_mode=ParseMode.MARKDOWN)
+
+    async def on_transferir(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """/transferir_dueno <user_id> — PR6.2a: transferir el control del bot a otra
+        persona. SOLO el dueño. Pide CONFIRMACIÓN (regala el control → máximo cuidado).
+        La transferencia es atómica (owner + encargado del equipo + JSON)."""
+        msg, user = update.message, update.effective_user
+        if msg is None or user is None:
+            return
+        if not self._es_admin(user.id):
+            await msg.reply_text("⛔ Comando solo para el dueño.")
+            return
+        # parsear el user_id destino
+        if not context.args or not context.args[0].lstrip("-").isdigit():
+            await msg.reply_text(
+                "Uso: /transferir_dueno <user_id de Telegram>\n"
+                "⚠️ Le das el CONTROL TOTAL del bot a esa persona (tú dejas de ser dueño)."
+            )
+            return
+        nuevo = int(context.args[0])
+        if nuevo == user.id:
+            await msg.reply_text("Ya eres el dueño. 🙂")
+            return
+        # guardar pendiente + pedir confirmacion (doble check)
+        self._transfer_pendiente = nuevo
+        teclado = InlineKeyboardMarkup([[
+            InlineKeyboardButton("✅ Sí, transferir", callback_data=f"transf:{nuevo}"),
+            InlineKeyboardButton("❌ Cancelar", callback_data="transf:no"),
+        ]])
+        await msg.reply_text(
+            f"⚠️ *Transferir el control del bot al usuario {nuevo}?*\n\n"
+            "Esto le da CONTROL TOTAL (admin) y TÚ DEJAS DE SER DUEÑO. No se puede "
+            "deshacer salvo que el nuevo dueño te lo transfiera de vuelta. ¿Seguro?",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=teclado,
+        )
+
+    async def on_transferir_select(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Callback de confirmación de /transferir_dueno (botón ✅/❌). PR6.2a."""
+        q = update.callback_query
+        if q is None:
+            return
+        await q.answer()
+        # solo el dueño actual puede confirmar
+        if not self._es_admin(q.from_user.id if q.from_user else None):
+            await q.edit_message_text("⛔ Solo el dueño puede confirmar esto.")
+            return
+        dato = (q.data or "").split(":", 1)[1] if ":" in (q.data or "") else "no"
+        if dato == "no":
+            self._transfer_pendiente = None
+            await q.edit_message_text("❌ Transferencia cancelada. Sigues siendo el dueño.")
+            return
+        nuevo = int(dato)
+        ok, motivo = await self._owners.transferir(self._pool, nuevo)
+        if ok:
+            await q.edit_message_text(
+                f"✅ Listo. El usuario {nuevo} es ahora el dueño de For3s OS. "
+                "Tú ya no tienes permisos de admin."
+            )
+        else:
+            await q.edit_message_text(f"⚠️ No pude transferir ({motivo}). Sigues siendo el dueño.")
+
+    async def on_recuperar_dueno(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """/recuperar_dueno — PR6.2b: re-sincroniza el dueño desde la BD (fuente de
+        verdad) si algo se desincronizó (owner ↔ encargado ↔ JSON). Solo el dueño."""
+        msg, user = update.message, update.effective_user
+        if msg is None or user is None:
+            return
+        if not self._es_admin(user.id):
+            await msg.reply_text("⛔ Comando solo para el dueño.")
+            return
+        ok, info = await self._owners.recuperar(self._pool)
+        if ok:
+            await msg.reply_text(f"✅ Dueño re-sincronizado desde la BD: {info}. Todo alineado.")
+        else:
+            await msg.reply_text(f"⚠️ No pude recuperar ({info}).")
+
+    async def on_reconectar(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """/reconectar — PR10.3a: auto-recuperación de integraciones. Reconecta el
+        GitHub MCP (sesión persistente) Y VERIFICA los hermanos de red (github-mcp
+        read+write, render) por HTTP. Reporta cuáles están vivos. Para el dueño.
+        Es lo que se usa cuando una integración falla, SIN reinicio total."""
+        msg, user = update.message, update.effective_user
+        if msg is None or user is None:
+            return
+        if not self._es_admin(user.id):
+            await msg.reply_text("⛔ Comando solo para el dueño.")
+            return
+        await msg.reply_text("🔌 Reconectando integraciones…")
+
+        lineas: list[str] = []
+
+        # 1) GitHub MCP (sesión persistente): recrear el cliente
+        vieja = self._mcp
+        self._mcp = None
+        if vieja is not None:
+            await vieja.aclose()
+        try:
+            settings = load_settings()
+            pat = await SecretStore(self._pool).get_secret(settings.owner_session, "github_token")
+            mcp = GitHubMCPClient(pat, read_only=True)
+            await mcp.start()
+            self._mcp = mcp
+            lineas.append("✅ GitHub MCP (lectura): reconectado")
+        except Exception:  # noqa: BLE001
+            logger.exception("reconectar: fallo el GitHub MCP")
+            self._mcp = None
+            lineas.append("🔴 GitHub MCP (lectura): NO reconectó")
+
+        # 2) verificar los hermanos de red por HTTP (no tienen sesión persistente)
+        import os as _os
+
+        import httpx
+
+        hermanos = [
+            ("GitHub MCP (escritura)", _os.environ.get("FOR3S_GITHUB_MCP_WRITE_URL", "http://github-mcp-write:8082/mcp")),
+            ("Render (web/JS)", _os.environ.get("FOR3S_RENDER_URL", "http://render:8080/").rstrip("/") + "/health"),
+        ]
+        for nombre, url in hermanos:
+            try:
+                async with httpx.AsyncClient(timeout=6) as cli:
+                    r = await cli.get(url)
+                vivo = r.status_code in (200, 401, 406, 400)
+                lineas.append(f"{'✅' if vivo else '⚠️'} {nombre}: {'vivo' if vivo else f'HTTP {r.status_code}'}")
+            except Exception as e:  # noqa: BLE001
+                lineas.append(f"🔴 {nombre}: no responde ({type(e).__name__})")
+
+        # resumen + guía si algo sigue mal
+        n_fail = sum(1 for ln in lineas if ln.startswith("🔴"))
+        cabeza = "🔌 *Reconexión de integraciones*\n"
+        if n_fail:
+            cabeza += (
+                "Algunos servicios siguen caídos. Si son los hermanos de red "
+                "(render/write), están en contenedores aparte → puede que necesiten "
+                "que el dueño los revise en el servidor.\n\n"
+            )
+        else:
+            cabeza += "Todo reconectado.\n\n"
+        await msg.reply_text(cabeza + "\n".join(lineas), parse_mode=ParseMode.MARKDOWN)
 
     async def on_reiniciar(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """/reiniciar — reinicio SUAVE: reconecta el GitHub MCP (sin matar proceso)."""
@@ -2845,6 +3276,7 @@ def main() -> int:
     app.add_handler(CommandHandler("start", channel.on_start))
     app.add_handler(CommandHandler("cupo", channel.on_cupo))
     # comandos de administración (solo dueño/admin)
+    app.add_handler(CommandHandler("ayuda", channel.on_ayuda))  # PR10.1 soporte
     app.add_handler(CommandHandler("estado", channel.on_estado))
     app.add_handler(CommandHandler("version", channel.on_version))  # AI5
     app.add_handler(CommandHandler("perfil", channel.on_perfil))  # P1
@@ -2853,7 +3285,13 @@ def main() -> int:
     app.add_handler(CommandHandler("model", channel.on_model))
     app.add_handler(CommandHandler("autogen", channel.on_autogen))  # H11: kill switch
     app.add_handler(CommandHandler("dmn", channel.on_dmn))  # H9: SUEÑA (DMN)
+    app.add_handler(CommandHandler("salud", channel.on_salud))  # PR2 monitoreo
+    app.add_handler(CommandHandler("datos", channel.on_datos))  # PR3 analitica
     app.add_handler(CommandHandler("diagnostico", channel.on_diagnostico))
+    app.add_handler(CommandHandler("transferir_dueno", channel.on_transferir))  # PR6.2a
+    app.add_handler(CommandHandler("recuperar_dueno", channel.on_recuperar_dueno))  # PR6.2b
+    app.add_handler(CallbackQueryHandler(channel.on_transferir_select, pattern=r"^transf:"))  # PR6.2a
+    app.add_handler(CommandHandler("reconectar", channel.on_reconectar))  # PR10.3a
     app.add_handler(CommandHandler("reiniciar", channel.on_reiniciar))
     app.add_handler(CommandHandler("reiniciar_duro", channel.on_reiniciar_duro))
     app.add_handler(CommandHandler("invitar", channel.on_invitar))  # H8 S10e: la puerta
