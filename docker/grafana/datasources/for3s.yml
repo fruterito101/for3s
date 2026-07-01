@@ -1,0 +1,19 @@
+# PR2.3 — datasource PostgreSQL de For3s OS (provisionado, no manual).
+# Grafana lee la BD del bot por la red interna for3s_net. Solo lectura de facto
+# (dashboards = SELECT). El password viene del .env (misma var que el bot).
+apiVersion: 1
+datasources:
+  - name: For3s-Postgres
+    type: postgres
+    access: proxy
+    url: postgres:5432
+    database: for3s
+    user: for3s
+    secureJsonData:
+      password: ${POSTGRES_PASSWORD}
+    jsonData:
+      sslmode: disable
+      postgresVersion: 1600
+      timescaledb: false
+    isDefault: true
+    editable: false

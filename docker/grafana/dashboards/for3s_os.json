@@ -1,0 +1,35 @@
+{
+  "uid": "for3s-os-main",
+  "title": "For3s OS — Salud & Actividad",
+  "tags": ["for3s"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "time": {"from": "now-30d", "to": "now"},
+  "panels": [
+    {
+      "id": 1, "title": "Actividad — turnos por día", "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "datasource": {"type": "postgres", "uid": "For3s-Postgres"},
+      "targets": [{"format": "time_series", "rawSql": "SELECT created_at::date AS time, count(*) AS turnos FROM episodes_events WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 1"}]
+    },
+    {
+      "id": 2, "title": "Tokens por día (in + out)", "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "datasource": {"type": "postgres", "uid": "For3s-Postgres"},
+      "targets": [{"format": "time_series", "rawSql": "SELECT created_at::date AS time, sum(tokens_in) AS tokens_in, sum(tokens_out) AS tokens_out FROM episodes_events WHERE deleted_at IS NULL GROUP BY 1 ORDER BY 1"}]
+    },
+    {
+      "id": 3, "title": "Ciclo nocturno — corridas por job (ok/fallo)", "type": "table",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "datasource": {"type": "postgres", "uid": "For3s-Postgres"},
+      "targets": [{"format": "table", "rawSql": "SELECT job, count(*) AS corridas, count(*) FILTER (WHERE ok) AS ok, count(*) FILTER (WHERE NOT ok) AS fallos, max(creado_at) AS ultima FROM cron_corridas GROUP BY job ORDER BY job"}]
+    },
+    {
+      "id": 4, "title": "Acciones registradas (audit) por tipo", "type": "table",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "datasource": {"type": "postgres", "uid": "For3s-Postgres"},
+      "targets": [{"format": "table", "rawSql": "SELECT action, count(*) AS veces FROM audit_events GROUP BY action ORDER BY veces DESC LIMIT 15"}]
+    }
+  ]
+}

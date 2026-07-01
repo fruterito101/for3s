@@ -79,6 +79,7 @@ _MENU_BASICO = [
     BotCommand("perfil", "Ver o editar tu perfil (rol, preferencias)"),
     BotCommand("skills", "Ver las skills (recetas) de For3s"),
     BotCommand("aprende", "🧠 Aprender una skill de lo que trabajamos"),
+    BotCommand("equipo", "🤝 Lanzar el equipo multi-agente en una tarea"),
     BotCommand("tema", "Crear o cambiar de tema (hilo)"),
     BotCommand("temas", "Ver y elegir entre tus temas"),
     BotCommand("hilos", "Ver tus hilos y su actividad"),
@@ -846,10 +847,20 @@ class TelegramChannel:
             logger.warning("no se pudo fijar el mensaje de cupo (no crítico)")
 
     def _base_sesion(self, user) -> str:
-        """Hilo BASE de la persona (#6), SIN tema. Dueño→'brian' (conserva
-        historial); otros→'tg:<uid>'. Sin user→dueño (compat)."""
+        """Hilo BASE de la persona (#6), SIN tema. TODOS (dueño incluido) usan
+        `tg:<uid>` — la sesión va ligada a la IDENTIDAD, no a un nombre fijo.
+
+        BUG-17/inconsistencia de nombres (2026-07-01): antes el dueño usaba
+        `owner_session` ('brian', string fijo) → (a) inconsistente con los miembros
+        (tg:<uid>); (b) al transferir el dueño, el nuevo heredaba 'brian' con el
+        historial del viejo (fuga). Ahora la sesión del dueño = `tg:<su_uid>` como
+        todos → sin nombre especial, sin fuga al transferir. La memoria de 'brian' ya
+        se migró a tg:1923367928 en BD+grafo. ⚠️ OJO: `owner_session` ('brian') SIGUE
+        siendo la clave de CIFRADO de secrets (SecretStore) y de config (modelos) —
+        eso NO cambia; solo se desacopló el rol de SESIÓN de memoria.
+        Sin uid (CLI) → cae a owner_session (compat)."""
         uid = getattr(user, "id", None)
-        if uid is None or self._owners.is_authorized(uid):
+        if uid is None:
             return self._owner_session
         return f"tg:{uid}"
 
@@ -1522,6 +1533,62 @@ class TelegramChannel:
             lineas.append(f"• {r}")
         lineas.append("\n_Edita con `/perfil <campo> <valor>` o dímelo en el chat._")
         await msg.reply_text("\n".join(lineas), parse_mode=ParseMode.MARKDOWN)
+
+    async def on_equipo(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """/equipo <tarea> — F (pulido H8): lanza el EQUIPO multi-agente MANUALMENTE
+        (sin depender de las frases-gatillo de _amerita_equipo ni del botón sugerido).
+        Descubrible desde el menú. Reusa el flujo con lock/cola ya probado
+        (_correr_equipo_y_responder). Salvaguardas (análisis de comportamiento):
+          1. AUTORIZA primero (como cualquier comando) — sin esto, un no-autorizado
+             dispararía el equipo (gasto). Fail-closed.
+          2. Exige una TAREA (args) — /equipo a secas explica el uso, no lanza vacío.
+          3. Verifica que el cerebro (provider) esté listo — _correr_equipo_inner no
+             lo valida, así que lo hacemos aquí para no fallar feo.
+          4. Pasa sesión + scope + autor de ESTA persona (aislamiento correcto)."""
+        msg, user = update.message, update.effective_user
+        if msg is None or user is None:
+            return
+        # 1) autorización (mismo patrón que los demás comandos, aditivo dueño/miembro/puerta)
+        ok, motivo = await self._autorizar(user)
+        if not ok:
+            await msg.reply_text(
+                "🔴 La puerta de este equipo está cerrada."
+                if motivo == "puerta_cerrada"
+                else "⛔ Este bot es privado."
+            )
+            return
+        # 2) exigir tarea
+        tarea = " ".join(context.args).strip() if context.args else ""
+        if len(tarea) < 5:
+            await msg.reply_text(
+                "🤝 *Lanzar el equipo multi-agente*\n\n"
+                "Uso: `/equipo <lo que quieres analizar a fondo>`\n"
+                "Ej: `/equipo analiza los riesgos de migrar la base de datos`\n\n"
+                "Convoco a varios especialistas en paralelo y te doy un informe único. "
+                "Ideal para análisis profundos, decisiones, auditorías.",
+                parse_mode=ParseMode.MARKDOWN,
+            )
+            return
+        # 3) cerebro listo
+        provider = getattr(self._agent, "_provider", None)
+        if self._pool is None or self._agent is None or provider is None:
+            await msg.reply_text("⚠️ No puedo lanzar el equipo ahora (sistema no listo). Reintenta.")
+            return
+        # 4) sesión + scope + autor de ESTA persona (aislamiento, como el flujo normal)
+        scope = None if self._owners.is_authorized(user.id) else user.id
+        try:
+            await self._correr_equipo_y_responder(
+                msg,
+                tarea,
+                scope_user_id=scope,
+                sesion=await self._sesion_de(user),
+                autor_id=user.id,
+            )
+        except Exception:  # noqa: BLE001 — el equipo nunca debe tumbar el bot
+            logger.warning("/equipo falló", exc_info=True)
+            await _responder_seguro(
+                msg, "⚠️ El equipo no pudo completar el análisis. Reintenta en un momento."
+            )
 
     async def on_aprende(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """/aprende [tema] — H12 P1: destila una skill (receta) de la conversación
@@ -3310,6 +3377,7 @@ def main() -> int:
     app.add_handler(CommandHandler("perfil", channel.on_perfil))  # P1
     app.add_handler(CommandHandler("skills", channel.on_skills))  # H10
     app.add_handler(CommandHandler("aprende", channel.on_aprende))  # H12 P1
+    app.add_handler(CommandHandler("equipo", channel.on_equipo))  # F (pulido H8): lanzar equipo manual
     app.add_handler(CommandHandler("model", channel.on_model))
     app.add_handler(CommandHandler("autogen", channel.on_autogen))  # H11: kill switch
     app.add_handler(CommandHandler("dmn", channel.on_dmn))  # H9: SUEÑA (DMN)

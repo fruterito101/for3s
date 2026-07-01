@@ -154,25 +154,36 @@ async def registrar_concepto(
     descripcion: str,
     tipo: str,
     seqs: list[int],
+    session_id: str = "",
 ) -> bool:
     """Escribe un CONCEPTO consolidado en el grafo (idempotente vía MERGE).
 
     Crea: (Concepto {label, descripcion, tipo}) y, por cada episodio fuente,
-    (Concepto)-[:DERIVED_FROM]->(Episodio {seq}). Re-registrar el mismo concepto
-    NO duplica (MERGE por label). Respeta las 4 reglas de AGE (ver cabecera).
+    (Concepto)-[:DERIVED_FROM]->(Episodio {seq, session_id}). Re-registrar el mismo
+    concepto NO duplica (MERGE por label). Respeta las reglas de AGE (ver cabecera).
+
+    BUG-19 (2026-07-01): el nodo Episodio ahora se identifica por (seq, session_id),
+    NO solo por seq. Los seq se solapan entre sesiones (Sme G 1-26, Brian 1-692), así
+    que sin session_id el `MERGE (e:Episodio {seq:5})` fundía el episodio 5 de UNA
+    persona con el 5 de OTRA → mezcla de memoria entre usuarios en el grafo. Con el
+    CLS multi-sesión (BUG-18) esto se dispararía en la 1ª consolidación de un miembro.
+    Ahora cada sesión tiene sus propios nodos Episodio. Retrocompat: si no se pasa
+    session_id (llamadas viejas), usa '' — pero el CLS SIEMPRE lo pasa.
 
     Lo usa CLS (consolidator.py) tras extraer el concepto de un cluster. Defensivo.
     """
     if not label:
         return False
     lab, desc, tp = _esc(label), _esc(descripcion), _esc(tipo)
+    sid = _esc(session_id)
     # 1) MERGE del nodo concepto (identidad = label) + actualizar props
     cypher_nodo = (
         f"MERGE (c:Concepto {{label:'{lab}'}}) SET c.descripcion = '{desc}', c.tipo = '{tp}'"
     )
     if not await _write(pool, cypher_nodo):
         return False
-    # 2) una arista DERIVED_FROM por cada episodio fuente (MERGE → idempotente)
+    # 2) una arista DERIVED_FROM por cada episodio fuente (MERGE → idempotente).
+    #    El Episodio se identifica por (seq, session_id) → no colisiona entre sesiones.
     ok = True
     for seq in seqs:
         try:
@@ -181,7 +192,7 @@ async def registrar_concepto(
             continue
         cypher_arista = (
             f"MERGE (c:Concepto {{label:'{lab}'}}) "
-            f"MERGE (e:Episodio {{seq:{n}}}) "
+            f"MERGE (e:Episodio {{seq:{n}, session_id:'{sid}'}}) "
             f"MERGE (c)-[:DERIVED_FROM]->(e)"
         )
         ok = await _write(pool, cypher_arista) and ok
@@ -191,12 +202,13 @@ async def registrar_concepto(
 async def episodios_de_concepto(pool: asyncpg.Pool, label: str) -> list[int]:
     """Navega: de qué episodios se derivó un concepto (1 hop). RETURN un MAPA (1
     columna) — AGE no castea un integer escalar a json (regla extra: envolver el
-    entero en un mapa, como recursos_de_repo)."""
+    entero en un mapa, como recursos_de_repo). BUG-19: ahora el mapa incluye
+    session_id (el Episodio se identifica por seq+session_id)."""
     lab = _esc(label)
     filas = await _read(
         pool,
         f"MATCH (:Concepto {{label:'{lab}'}})-[:DERIVED_FROM]->(e:Episodio) "
-        f"RETURN {{seq: e.seq}} AS r",
+        f"RETURN {{seq: e.seq, session_id: e.session_id}} AS r",
     )
     return [int(f["seq"]) for f in filas if isinstance(f, dict) and "seq" in f]
 

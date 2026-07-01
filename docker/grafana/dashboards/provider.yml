@@ -1,0 +1,11 @@
+# PR2.3 — carga automática de dashboards desde /var/lib/grafana/dashboards
+apiVersion: 1
+providers:
+  - name: For3s
+    orgId: 1
+    folder: For3s OS
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards

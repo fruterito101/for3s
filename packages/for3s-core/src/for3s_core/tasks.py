@@ -353,10 +353,15 @@ async def job_dmn_noche(ctx: dict) -> str:
             await pool.close()
 
 
+@registra_corrida("dmn_idle")
 async def job_dmn_idle(ctx: dict) -> str:
     """DMN oportunista de DÍA (H9, cada 30 min): si el sistema está idle (≥N min sin
     uso), corre solo las tasks LIGERAS (solo_noche=False) — aprovecha los ratos
-    muertos sin molestar. Si no está idle, no hace nada. Defensivo."""
+    muertos sin molestar. Si no está idle, no hace nada. Defensivo.
+
+    PR2.3 (2026-06-30): antes era el ÚNICO job SIN @registra_corrida → sus corridas
+    eran invisibles en cron_corridas (y en /salud nocturno y Grafana). Ahora se
+    registra como los otros 8, para observabilidad completa del scheduler."""
     from for3s_core import (
         dmn,
         dmn_tasks,  # noqa: F401 — registra las housekeeping al importar

@@ -319,9 +319,13 @@ async def extraer_concepto(cluster: Cluster, provider=None) -> Concepto:
 # ===========================================================================
 
 
-async def escribir_concepto(pool, concepto: Concepto) -> bool:
+async def escribir_concepto(pool, concepto: Concepto, session_id: str = "") -> bool:
     """Escribe un Concepto en el grafo (nodo + aristas DERIVED_FROM a sus episodios
     fuente), reusando kg.registrar_concepto. Idempotente (MERGE). Defensivo.
+
+    BUG-19 (2026-07-01): pasa session_id → los nodos Episodio se identifican por
+    (seq, session_id), sin colisionar entre sesiones (los seq se solapan entre
+    usuarios). Imprescindible con el CLS multi-sesión (BUG-18).
 
     NO marca consolidated_to_kg (eso lo hace el orquestador del Sub-paso 7 cuando
     TODO el pipeline del cluster completó). Aquí solo escribe al grafo.
@@ -334,6 +338,7 @@ async def escribir_concepto(pool, concepto: Concepto) -> bool:
         concepto.descripcion,
         concepto.tipo,
         concepto.seqs,
+        session_id=session_id,
     )
 
 
@@ -418,7 +423,7 @@ async def consolidar(
         escrito = False
         marcados = 0
         if not dry_run:
-            escrito = await escribir_concepto(pool, concepto)
+            escrito = await escribir_concepto(pool, concepto, session_id=session_id)
             if escrito:
                 conceptos_escritos += 1
                 # SOLO marcar si el concepto llegó al grafo (orden seguro)

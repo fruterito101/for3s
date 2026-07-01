@@ -116,9 +116,33 @@ services:
     image: for3s-render:latest
     restart: unless-stopped
 
+  # 8) GRAFANA — OJO / observabilidad visual (PR2.3, 2026-06-30). HERMANO de red.
+  #    Lee la BD del bot (postgres) y muestra dashboards provisionados (actividad,
+  #    tokens, ciclo nocturno, audit). SOLO localhost del server (127.0.0.1) — NO
+  #    expuesto a internet; se accede por Tailscale/túnel. Aditivo: si falla, el bot
+  #    sigue igual (Grafana no toca nada, solo SELECT).
+  grafana:
+    image: grafana/grafana:11.3.0
+    depends_on:
+      postgres: { condition: service_healthy }
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-for3s_admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-for3s_local}
+    volumes:
+      - ./docker/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./docker/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./docker/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - for3s_grafana:/var/lib/grafana
+    ports:
+      - "127.0.0.1:3000:3000"   # SOLO localhost del server (seguridad)
+    restart: unless-stopped
+
 volumes:
   for3s_pgdata:      # la BD (memoria, skills, todo) — se borra con `compose down -v`
   for3s_valkeydata:
+  for3s_grafana:    # dashboards + config de Grafana (PR2.3)
 
 # Red interna privada: los 4 servicios se hablan por nombre (postgres, valkey...).
 # Nadie de afuera entra (no se exponen puertos al host salvo lo mínimo).
