@@ -262,13 +262,21 @@ class SkillEcosystemGovernor:
 
     # ───────────── FRENO 4: contradicción (duplicado) ─────────────
     async def check_contradictions(self, nombre: str, categoria: str) -> Veredicto:
-        """¿Choca con una skill ya activa? v1 = no duplicar (mismo categoría+nombre).
+        """¿Choca con una skill ya activa? (HA-5, 2026-06-30 — endurecido)
 
-        La versión semántica (descripción casi-idéntica vía pgvector) llega con H12,
-        cuando haya embeddings de skills. Hoy: exact-match, conservador."""
+        Antes: solo exact-match (categoría, nombre) → dejó pasar duplicados con nombres
+        casi iguales ('pipeline-de-despliegue-de-botservicio' vs '...-bot-en-servidor').
+        Ahora dos capas:
+          1. exact-match (categoría + slug idéntico).
+          2. SIMILITUD DE NOMBRE: misma categoría + el nombre comparte ≥70% de sus
+             palabras significativas (Jaccard) con una skill activa → duplicado.
+        (El embedding de skills existe ya — HA-5 — pero para el FRENO usamos Jaccard de
+        nombre: no depende del modelo y es fail-closed limpio.) Fail-closed."""
         from for3s_core.skills import normalizar_nombre
 
         slug = normalizar_nombre(nombre)
+        _STOP = {"de", "del", "la", "el", "en", "y", "a", "un", "una", "para", "con"}
+        pal_nuevo = {p for p in slug.split("-") if len(p) >= 3 and p not in _STOP}
         try:
             async with self._pool.acquire() as con:
                 existe = await con.fetchval(
@@ -276,13 +284,35 @@ class SkillEcosystemGovernor:
                     categoria,
                     slug,
                 )
-            if existe:
-                return Veredicto(
-                    False,
-                    "duplicado",
-                    f"Ya existe una skill activa '{categoria}/{slug}'. "
-                    f"Para cambiarla, edítala (no dupliques).",
+                if existe:
+                    return Veredicto(
+                        False,
+                        "duplicado",
+                        f"Ya existe una skill activa '{categoria}/{slug}'. "
+                        f"Para cambiarla, edítala (no dupliques).",
+                    )
+                activas = await con.fetch(
+                    "SELECT nombre FROM skills WHERE categoria=$1 AND lifecycle='active'",
+                    categoria,
                 )
+            if pal_nuevo:
+                for r in activas:
+                    pal_exist = {
+                        p for p in r["nombre"].split("-") if len(p) >= 3 and p not in _STOP
+                    }
+                    if not pal_exist:
+                        continue
+                    comunes = pal_nuevo & pal_exist
+                    union = pal_nuevo | pal_exist
+                    jaccard = len(comunes) / len(union) if union else 0.0
+                    if jaccard >= 0.70:
+                        return Veredicto(
+                            False,
+                            "duplicado",
+                            f"Muy similar a la skill activa '{categoria}/{r['nombre']}' "
+                            f"(solapa {len(comunes)}/{len(union)} palabras). "
+                            f"Edítala en vez de duplicar.",
+                        )
             return Veredicto(True, "duplicado", "sin colisión")
         except Exception:  # noqa: BLE001 — fail-closed
             return Veredicto(False, "duplicado", "no pude verificar duplicados")

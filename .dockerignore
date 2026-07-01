@@ -1,0 +1,14 @@
+# Build: no meter basura en la imagen (HA-4, 2026-06-30)
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.bak
+**/*.bak[0-9]
+**/*.bak.*
+**/*.bak-*
+.git/
+.pytest_cache/
+**/.coverage
+*.egg-info/
+.venv/
+venv/

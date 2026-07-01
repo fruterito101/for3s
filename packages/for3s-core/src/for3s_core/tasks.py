@@ -128,6 +128,20 @@ async def _get_pool():
     return await db.connect(s.database_url)
 
 
+async def _sesiones_vivas(pool) -> list[str]:
+    """BUG-18 (2026-06-30): TODAS las sesiones con memoria viva embebida — del DUEÑO,
+    de sus TEMAS (brian:backend...) Y de los MIEMBROS (tg:<uid>). Antes el ciclo
+    nocturno (CLS/Microglía) operaba SOLO sobre SESSION_OWNER='brian' → la memoria de
+    los miembros y de otros temas NUNCA se consolidaba al grafo ni se podaba. job_cls y
+    job_microglia ahora iteran esto (como job_relevance ya hacía). Las sesiones de test
+    sin embedding se saltan solas (filtro embedding IS NOT NULL)."""
+    rows = await pool.fetch(
+        "SELECT DISTINCT session_id FROM episodes_events "
+        "WHERE deleted_at IS NULL AND embedding IS NOT NULL"
+    )
+    return [r["session_id"] for r in rows]
+
+
 # --- Jobs ------------------------------------------------------------------
 async def ping(ctx: dict) -> str:
     """Job trivial de prueba (Sub-paso 1). Verifica que el worker ejecuta jobs."""
@@ -140,16 +154,29 @@ async def ping(ctx: dict) -> str:
 @registra_corrida("cls")
 async def job_cls(ctx: dict) -> str:
     """Job nocturno CLS (2 AM México): consolida episodios pendientes → conceptos
-    al Knowledge Graph. Defensivo: si falla, loguea pero no tumba el worker."""
+    al Knowledge Graph. BUG-18 (2026-06-30): ahora procesa TODAS las sesiones (dueño +
+    temas + miembros), no solo 'brian' — la memoria de los miembros también madura.
+    Defensivo: una sesión que falle no frena las demás ni tumba el worker."""
     from for3s_core import consolidator
 
     pool = None
     try:
         pool = await _get_pool()
-        r = await consolidator.consolidar(pool, SESSION_OWNER, dry_run=False)
+        sesiones = await _sesiones_vivas(pool)
+        tot_clusters = tot_conceptos = tot_marcados = 0
+        n_ses = 0
+        for sid in sesiones:
+            try:
+                r = await consolidator.consolidar(pool, sid, dry_run=False)
+                tot_clusters += r.clusters
+                tot_conceptos += r.conceptos_escritos
+                tot_marcados += r.episodios_marcados
+                n_ses += 1
+            except Exception as e:  # noqa: BLE001 — una sesión mala no frena al resto
+                logger.warning("[job_cls] sesión %s falló: %s", sid, type(e).__name__)
         msg = (
-            f"CLS: clusters={r.clusters} conceptos={r.conceptos_escritos} "
-            f"marcados={r.episodios_marcados} (pendientes_eval={r.total_pendientes})"
+            f"CLS: {n_ses} sesiones · clusters={tot_clusters} "
+            f"conceptos={tot_conceptos} marcados={tot_marcados}"
         )
         logger.info("[job_cls] %s", msg)
         return msg
@@ -239,9 +266,19 @@ async def job_microglia(ctx: dict) -> str:
     pool = None
     try:
         pool = await _get_pool()
-        r = await microglia.olvidar(pool, SESSION_OWNER, confirmar=MICROGLIA_CONFIRMAR)
+        sesiones = await _sesiones_vivas(pool)
         modo = "REAL" if MICROGLIA_CONFIRMAR else "DRY-RUN"
-        msg = f"Microglía [{modo}]: candidatos={r.candidatos} olvidados={r.olvidados}"
+        tot_cand = tot_olv = 0
+        n_ses = 0
+        for sid in sesiones:
+            try:
+                r = await microglia.olvidar(pool, sid, confirmar=MICROGLIA_CONFIRMAR)
+                tot_cand += r.candidatos
+                tot_olv += r.olvidados
+                n_ses += 1
+            except Exception as e:  # noqa: BLE001 — una sesión mala no frena al resto
+                logger.warning("[job_microglia] sesión %s falló: %s", sid, type(e).__name__)
+        msg = f"Microglía [{modo}]: {n_ses} sesiones · candidatos={tot_cand} olvidados={tot_olv}"
         logger.info("[job_microglia] %s", msg)
         return msg
     except Exception as e:  # noqa: BLE001

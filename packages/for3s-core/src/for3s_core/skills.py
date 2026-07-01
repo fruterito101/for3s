@@ -66,15 +66,28 @@ class SkillStore:
         provenance: str = PROV_USUARIO,
         creada_por: int | None = None,
     ) -> int:
-        """Crea (o reemplaza) una skill. Devuelve su id. Idempotente por (cat,nombre)."""
+        """Crea (o reemplaza) una skill. Devuelve su id. Idempotente por (cat,nombre).
+
+        HA-5: genera el EMBEDDING (nombre+descripción+tags) para el matcher semántico
+        (buscar_relevantes). Defensivo: si el modelo no está, la skill se crea con
+        embedding NULL (el matcher cae al fallback por palabras para esa skill; el
+        backfill la rellena después)."""
         slug = normalizar_nombre(nombre)
+        emb = None
+        try:
+            from for3s_core import embeddings
+
+            texto_emb = f"{slug.replace('-', ' ')}. {descripcion}. {' '.join(tags or [])}"
+            emb = embeddings.a_pgvector(embeddings.embed(texto_emb))
+        except Exception:  # noqa: BLE001 — sin modelo → embedding NULL, no rompe
+            logger.warning("[skills] no pude generar embedding para %s (queda NULL)", slug)
         async with self._pool.acquire() as con:
             sid = await con.fetchval(
                 "INSERT INTO skills (nombre, categoria, descripcion, contenido, tags, "
-                " provenance, creada_por) VALUES ($1,$2,$3,$4,$5,$6,$7) "
+                " provenance, creada_por, embedding) VALUES ($1,$2,$3,$4,$5,$6,$7,$8::vector) "
                 "ON CONFLICT (categoria, nombre) DO UPDATE "
                 "SET contenido=$4, descripcion=$3, tags=$5, actualizada_at=now(), "
-                "    lifecycle='active' "
+                "    lifecycle='active', embedding=COALESCE($8::vector, skills.embedding) "
                 "RETURNING id",
                 slug,
                 categoria,
@@ -83,8 +96,10 @@ class SkillStore:
                 json.dumps(tags or []),
                 provenance,
                 creada_por,
+                emb,
             )
-        logger.info("[skills] creada/actualizada %s/%s (prov=%s)", categoria, slug, provenance)
+        logger.info("[skills] creada/actualizada %s/%s (prov=%s, emb=%s)",
+                    categoria, slug, provenance, "sí" if emb else "no")
         return sid
 
     async def listar(self, *, solo_activas: bool = True) -> list[SkillInfo]:
@@ -144,34 +159,107 @@ class SkillStore:
         except Exception:  # noqa: BLE001
             pass
 
+    # Stopwords: palabras demasiado comunes para que el FALLBACK por palabras cuente
+    # como señal (evita que "logs del servidor" dispare la skill de deploy).
+    _STOPWORDS_SKILL = frozenset({
+        "para", "como", "cuando", "donde", "esta", "este", "esto", "eso", "tienes",
+        "puedes", "quiero", "necesito", "ayuda", "ayudame", "hacer", "sobre", "todo",
+        "algo", "tengo", "estoy", "vamos", "favor", "porfa", "servidor", "server",
+    })
+    # Umbral de distancia coseno: una skill APLICA si su embedding está a distancia
+    # < este corte del mensaje. BGE-M3: ~0.0 idéntico, ~1.0 nada que ver. 0.55 =
+    # "del mismo tema" sin disparar por cualquier roce.
+    _UMBRAL_SKILL_DIST = 0.55
+
     async def buscar_relevantes(self, texto: str, *, limite: int = 3) -> list[SkillInfo]:
-        """Skills cuyo nombre/descripción/tags coinciden con el texto (match simple por
-        palabras). Para inyectar al contexto cuando una skill APLICA (H10-c). Defensivo."""
+        """Skills que APLICAN al texto, por SIGNIFICADO (HA-5, 2026-06-30 — semántico).
+
+        Usa el embedding BGE-M3 del mensaje vs el de cada skill (distancia coseno,
+        índice HNSW), igual que la memoria semántica (H5). Resuelve los dos fallos del
+        matcher por palabras: falsos positivos (1 palabra común disparaba la skill) y
+        falsos negativos (cruza idiomas: 'despliego el bot' ≈ 'deploy bot servidor').
+        Solo inyecta si distancia < _UMBRAL_SKILL_DIST.
+
+        DEFENSIVO Y ADITIVO: si el modelo falla o hay skills sin embedding aún, cae al
+        matcher por palabras (_buscar_relevantes_palabras). Nunca rompe el turno."""
         try:
-            t = normalizar_nombre(texto).replace("-", " ")
-            palabras = [p for p in t.split() if len(p) >= 4]
-            if not palabras:
-                return []
+            from for3s_core import embeddings
+
+            qvec = embeddings.a_pgvector(embeddings.embed(texto))
+        except Exception:  # noqa: BLE001 — sin modelo → fallback a palabras
+            logger.warning("embeddings no disponibles para skills, uso fallback palabras")
+            return await self._buscar_relevantes_palabras(texto, limite=limite)
+        try:
             async with self._pool.acquire() as con:
                 rows = await con.fetch(
                     "SELECT id, nombre, categoria, descripcion, provenance, lifecycle, "
-                    "veces_usada FROM skills WHERE lifecycle='active' AND ("
-                    "  lower(nombre) ~ $1 OR lower(descripcion) ~ $1 OR lower(tags::text) ~ $1"
-                    ") ORDER BY veces_usada DESC LIMIT $2",
-                    "(" + "|".join(re.escape(p) for p in palabras) + ")",
+                    "veces_usada, embedding <=> $1::vector AS dist FROM skills "
+                    "WHERE lifecycle='active' AND embedding IS NOT NULL "
+                    "ORDER BY dist LIMIT $2",
+                    qvec,
                     limite,
                 )
-            return [
+            relevantes = [
                 SkillInfo(
-                    r["id"],
-                    r["nombre"],
-                    r["categoria"],
-                    r["descripcion"],
-                    r["provenance"],
-                    r["lifecycle"],
-                    r["veces_usada"],
+                    r["id"], r["nombre"], r["categoria"], r["descripcion"],
+                    r["provenance"], r["lifecycle"], r["veces_usada"],
                 )
                 for r in rows
+                if float(r["dist"]) < self._UMBRAL_SKILL_DIST
+            ]
+            if not relevantes:
+                async with self._pool.acquire() as con:
+                    faltan = await con.fetchval(
+                        "SELECT count(*) FROM skills WHERE lifecycle='active' "
+                        "AND embedding IS NULL"
+                    )
+                if faltan:
+                    return await self._buscar_relevantes_palabras(texto, limite=limite)
+            return relevantes
+        except Exception:  # noqa: BLE001
+            logger.warning("error en búsqueda semántica de skills (fallback)", exc_info=True)
+            return await self._buscar_relevantes_palabras(texto, limite=limite)
+
+    async def _buscar_relevantes_palabras(
+        self, texto: str, *, limite: int = 3
+    ) -> list[SkillInfo]:
+        """FALLBACK por palabras (sin embeddings). Con umbral: ≥1 hit en el nombre o
+        ≥2 en desc/tags (stopwords no puntúan). Menos preciso que el semántico pero
+        mejor que el OR original (no dispara por 1 palabra suelta)."""
+        try:
+            t = normalizar_nombre(texto).replace("-", " ")
+            palabras = {
+                p for p in t.split()
+                if len(p) >= 4 and p not in self._STOPWORDS_SKILL
+            }
+            if not palabras:
+                return []
+            patron = "(" + "|".join(re.escape(p) for p in palabras) + ")"
+            async with self._pool.acquire() as con:
+                rows = await con.fetch(
+                    "SELECT id, nombre, categoria, descripcion, provenance, lifecycle, "
+                    "veces_usada, lower(nombre) lname, lower(descripcion) ldesc, "
+                    "lower(tags::text) ltags FROM skills WHERE lifecycle='active' AND ("
+                    "  lower(nombre) ~ $1 OR lower(descripcion) ~ $1 OR lower(tags::text) ~ $1"
+                    ")",
+                    patron,
+                )
+            puntuadas = []
+            for r in rows:
+                nombre_norm = r["lname"].replace("-", " ")
+                hits_nombre = sum(1 for p in palabras if p in nombre_norm)
+                blob = f"{r['ldesc']} {r['ltags']}"
+                hits_texto = sum(1 for p in palabras if p in blob)
+                if hits_nombre >= 1 or hits_texto >= 2:
+                    score = hits_nombre * 10 + hits_texto
+                    puntuadas.append((score, r))
+            puntuadas.sort(key=lambda x: (x[0], x[1]["veces_usada"]), reverse=True)
+            return [
+                SkillInfo(
+                    r["id"], r["nombre"], r["categoria"], r["descripcion"],
+                    r["provenance"], r["lifecycle"], r["veces_usada"],
+                )
+                for _score, r in puntuadas[:limite]
             ]
         except Exception:  # noqa: BLE001
             logger.warning("error buscando skills relevantes (ignoro)", exc_info=True)

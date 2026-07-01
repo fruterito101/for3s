@@ -189,9 +189,13 @@ async def buscar_semantico(
         se habló, sin contaminar con respuestas previas del propio bot.
     scope_user_id: SCOPE multi-usuario (H8 S10c). Si se da, esta persona solo ve:
         su memoria PRIVADA (owner_user_id = scope_user_id) + la COMÚN del equipo
-        (equipo_id no nulo) + el legado del dueño (owner_user_id NULL, recuerdos
-        previos al equipo). NUNCA la privada de OTRA persona. Si es None → sin
+        (equipo_id no nulo). NUNCA la privada de OTRA persona. Si es None → sin
         filtro de scope (modo single-owner de hoy: el dueño ve todo).
+        BUG-14 (2026-06-30): ANTES incluía "OR owner_user_id IS NULL" para el legado
+        del dueño — pero TODO el legado NULL eran turnos PRIVADOS del dueño, así que
+        esa cláusula los exponía a los miembros (fuga de privacidad latente, frenada
+        solo por el session_id). Se eliminó + backfill que atribuyó el legado a su
+        dueño. Ahora el scope NO depende del NULL: privacidad por construcción.
 
     DEFENSIVA: si el modelo de embeddings falla, devuelve [] (degrada a "sin
     recuerdos semánticos"), NO rompe el turno. Solo considera turnos con embedding
@@ -217,13 +221,14 @@ async def buscar_semantico(
     # son ruido (se parecen entre sí pero no aportan info). 2026-06-22.
     if solo_asistente:
         where.append("role = 'assistant'")
-    # SCOPE multi-usuario: la persona ve SU privada + la común del equipo + el
-    # legado del dueño (NULL). Nunca la privada de otro. (H8 S10c, fail-closed
-    # por construcción: sin esta cláusula nadie vería de más, con ella se acota.)
+    # SCOPE multi-usuario: la persona ve SU privada + la común del equipo. Nunca la
+    # privada de otro, NI el legado de nadie (BUG-14: se quitó "OR owner_user_id IS
+    # NULL" — exponía el legado privado del dueño a los miembros; ahora el legado
+    # tiene dueño tras el backfill). H8 S10c, fail-closed por construcción.
     if scope_user_id is not None:
         params.append(scope_user_id)
         where.append(
-            f"(owner_user_id = ${len(params)} OR equipo_id IS NOT NULL OR owner_user_id IS NULL)"
+            f"(owner_user_id = ${len(params)} OR equipo_id IS NOT NULL)"
         )
     if excluir_ultimos > 0:
         # H6: NO filtrar deleted_at — es aritmética de seq para la ventana reciente;

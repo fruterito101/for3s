@@ -2317,6 +2317,21 @@ class TelegramChannel:
         except Exception:  # noqa: BLE001
             pass
 
+        # HA-1b: qué analizó el EQUIPO en TU hilo (cablea handoff.ultimas_corridas,
+        # que estaba huérfana). Solo metadatos de TU sesión → respeta el aislamiento.
+        try:
+            from for3s_core import handoff
+
+            sesion = await self._sesion_de(user)
+            corridas = await handoff.ultimas_corridas(self._pool, sesion, limite=3)
+            if corridas:
+                lineas.append(f"• Equipo en tu hilo: {len(corridas)} corrida(s) reciente(s)")
+                for c in corridas[:3]:
+                    tarea = (c.get("tarea") or "")[:40]
+                    lineas.append(f"   ↳ {tarea} ({c.get('n_ok')}/{c.get('n_specialists')} ok)")
+        except Exception:  # noqa: BLE001 — sección secundaria, nunca rompe el diagnóstico
+            pass
+
         # estado de servicios (info no sensible, útil para saber si algo está caído)
         mcp = "✅" if self._mcp is not None else "❌ (avísame para reconectar)"
         lineas.append(f"\n*Servicios:* GitHub {mcp} · modelo {self._model}")
@@ -2337,6 +2352,19 @@ class TelegramChannel:
         if not self._es_admin(user.id):
             await msg.reply_text("⛔ Comando solo para el dueño.")
             return
+        # BUG-17 (2026-06-30): DESHABILITADO temporalmente. La transferencia NO renombra
+        # las sesiones de memoria → el nuevo dueño heredaría la sesión 'brian' con TODO el
+        # historial PRIVADO del dueño anterior (fuga), y el anterior perdería el suyo. El
+        # fix de raíz (desacoplar identidad-de-sesión del workspace-de-cifrado, migrar 7
+        # tablas + sessions con orden de FKs) está en PENDIENTES §AUDITORÍA CRÍTICA. Hasta
+        # entonces se bloquea para que NADIE dispare la fuga.
+        await msg.reply_text(
+            "⚠️ La transferencia de dueño está *temporalmente deshabilitada* mientras "
+            "rediseñamos cómo se mueve la memoria (para no exponer tu historial privado "
+            "al nuevo dueño). Se reactivará pronto. — BUG-17",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        return
         # parsear el user_id destino
         if not context.args or not context.args[0].lstrip("-").isdigit():
             await msg.reply_text(

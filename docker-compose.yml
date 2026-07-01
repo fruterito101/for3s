@@ -60,7 +60,7 @@ services:
       FOR3S_AGENT_NAME: ${FOR3S_AGENT_NAME:-For3s}
       GITHUB_PAT: ${GITHUB_PAT:-}
     # migra y LUEGO arranca el bot — el orden que decidimos (C2.A + C4.C)
-    command: ["sh", "-c", "python -m for3s_core.cli migrate && python -m for3s_core.telegram_channel"]
+    command: ["sh", "-c", "python -m for3s_core.cli migrate && exec python -m for3s_core.telegram_channel"]
     volumes:
       - /home/brianweb3/.for3s:/root/.for3s        # KEK del host (cifra/descifra secretos)
       - /home/brianweb3/.for3s:/app/.for3s         # owner/cupo (OwnerStore lee de cwd=/app/.for3s)
@@ -69,6 +69,9 @@ services:
     # Docker del host). GitHub-MCP y render llegan en v1.1 como servicios HERMANOS
     # de red declarados aquí mismo, y el agente solo se conecta a ellos.
     restart: unless-stopped
+    # BUG-15: tiempo para apagado limpio del polling (suelta
+    # getUpdates antes del SIGKILL -> evita el Conflict al reiniciar).
+    stop_grace_period: 25s
 
   # 4) WORKER — los jobs nocturnos (backup/CLS/Microglía/DMN). Misma imagen.
   worker:
