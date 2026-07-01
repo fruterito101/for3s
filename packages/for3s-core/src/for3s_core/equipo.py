@@ -251,6 +251,24 @@ class EquipoStore:
                 rol,
                 nombre,
             )
+            # F1 REDISEÑO MEMORIA (2026-07-01): mantener la tabla PERSONAS canónica
+            # sincronizada. Sin esto quedaría obsoleta al entrar alguien nuevo (bug de
+            # desincronización). Defensivo: si personas no existe (BD sin migr 026),
+            # no rompe el alta del miembro.
+            try:
+                await con.execute(
+                    "INSERT INTO personas (telegram_user_id, nombre, rol) "
+                    "VALUES ($1, $2, $3) "
+                    "ON CONFLICT (telegram_user_id) DO UPDATE "
+                    "SET rol = EXCLUDED.rol, "
+                    "    nombre = COALESCE(personas.nombre, EXCLUDED.nombre), "
+                    "    actualizada_at = now()",
+                    user_id,
+                    nombre,
+                    rol,
+                )
+            except Exception:  # noqa: BLE001 — personas es aditiva, no debe romper el alta
+                logger.warning("[equipo] no pude sincronizar personas para user=%s", user_id)
             logger.info(
                 "[equipo] miembro entró equipo=%s user=%s rol=%s reinvitar=%s",
                 equipo_id,

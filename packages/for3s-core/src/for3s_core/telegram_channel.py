@@ -409,6 +409,18 @@ class OwnerStore:
                     "actualizado_at=now()",
                     user_id,
                 )
+                # F1 REDISEÑO MEMORIA (2026-07-01): el dueño también en la tabla
+                # PERSONAS canónica (sincronía). Defensivo: si no existe (BD sin
+                # migr 026), no rompe el registro del owner.
+                try:
+                    await conn.execute(
+                        "INSERT INTO personas (telegram_user_id, rol) VALUES ($1, 'encargado') "
+                        "ON CONFLICT (telegram_user_id) DO UPDATE "
+                        "SET rol = COALESCE(personas.rol, 'encargado'), actualizada_at = now()",
+                        user_id,
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.warning("[owner] no pude sincronizar personas para owner=%s", user_id)
         except Exception as e:  # noqa: BLE001
             logger.warning("[owner] set_owner_bd falló (queda en JSON): %s", type(e).__name__)
 

@@ -52,7 +52,13 @@ MAX_HISTORY_TURNS = 12
 # Umbral de relevancia para recuerdos semánticos (H5): distancia coseno máxima
 # para considerar un recuerdo "relevante". 0=idéntico, mayor=menos parecido. Por
 # encima de esto el recuerdo es demasiado lejano para ayudar (y solo metería ruido).
-_DIST_MAX_RECUERDO = 0.75
+# F4 CASCADA (2026-07-01): BAJADO de 0.75 → 0.55 con evidencia medida. Análisis en
+# vivo: los recuerdos RELEVANTES reales están a 0.15–0.37; el RUIDO genuino (ej.
+# "cuando es mi cumpleaños" sin nada de cumpleaños en la memoria, "que hora es") a
+# 0.42–0.47. El 0.75 viejo dejaba pasar TODO ese ruido. 0.55 corta el ruido más claro
+# manteniendo amplio margen sobre los relevantes (≤0.37). Conservador — no baja a 0.40
+# (cortaría casos válidos no medidos); mismo umbral que el matcher de skills (HA-5).
+_DIST_MAX_RECUERDO = 0.55
 # Distancia MÍNIMA: por DEBAJO de esto el recuerdo es prácticamente IDÉNTICO a la
 # query — es la propia pregunta del usuario (o un duplicado exacto de pruebas/
 # repeticiones). Inyectarlo es ruido inútil ("recuerdo: tu misma pregunta") y
@@ -176,11 +182,30 @@ def _formatear_linea_tiempo(history: list, *, max_turnos: int = 8, max_chars: in
         return ""
 
 
-def _formatear_recuerdos(recuerdos: list) -> str:
+# F4 RE-RANKING (2026-07-01): distancia coseno por debajo de la cual un recuerdo se
+# acepta SIEMPRE (muy cercano = claramente relevante). Por ENCIMA, solo se acepta si
+# comparte alguna palabra clave con la query (2ª señal). Medido: relevantes reales
+# <0.40 o comparten palabra; el ruido de frontera difusa (dist 0.40-0.55 SIN palabra
+# común, ej. "clima"→"como estas") se descarta. La distancia SOLA no separaba señal de
+# ruido; palabra-clave + distancia sí.
+_DIST_ACEPTA_SIEMPRE = 0.40
+
+
+def _palabras_clave(texto: str) -> set:
+    """Palabras de contenido (≥4 letras, sin acentos) para el re-ranking F4."""
+    import re as _re
+    import unicodedata as _u
+
+    t = _u.normalize("NFKD", (texto or "").lower()).encode("ascii", "ignore").decode("ascii")
+    return {w for w in _re.findall(r"[a-z]+", t) if len(w) >= 4}
+
+
+def _formatear_recuerdos(recuerdos: list, query: str = "") -> str:
     """Convierte los RecuerdoRelevante en un bloque de texto para el contexto de
     Claude. Filtra ruido: (1) recuerdos demasiado lejanos (dist > MAX), (2) la
     query a sí misma / duplicados exactos (dist < MIN), (3) casi-idénticos entre
-    sí (dedup). Acorta cada uno. 2026-06-19: afinado tras turno conservador."""
+    sí (dedup), (4) F4 RE-RANKING: los de frontera difusa (dist ≥ ACEPTA_SIEMPRE) que
+    NO comparten palabra clave con la query = ruido, se descartan. Acorta cada uno."""
 
     # 1) filtro de relevancia: ni muy lejano ni la propia pregunta repetida.
     #    1b) descartar respuestas-META del bot (ruido conversacional, no info real)
@@ -190,10 +215,23 @@ def _formatear_recuerdos(recuerdos: list) -> str:
             _PREFIJOS_META_RUIDO
         )
 
+    # F4 re-ranking: palabras clave de la query (2ª señal además de la distancia)
+    pq = _palabras_clave(query) if query else set()
+
+    def _pasa_rerank(r) -> bool:
+        # muy cercano → siempre; lejano → solo si comparte palabra clave con la query
+        if r.distancia < _DIST_ACEPTA_SIEMPRE:
+            return True
+        if not pq:  # sin query (retrocompat) → no aplicar re-ranking
+            return True
+        return bool(pq & _palabras_clave(r.content))
+
     utiles = [
         r
         for r in recuerdos
-        if _DIST_MIN_RECUERDO <= r.distancia <= _DIST_MAX_RECUERDO and not _es_meta(r)
+        if _DIST_MIN_RECUERDO <= r.distancia <= _DIST_MAX_RECUERDO
+        and not _es_meta(r)
+        and _pasa_rerank(r)
     ]
     # 2) dedup: si dos recuerdos tienen el mismo texto (normalizado), dejar uno
     vistos = set()
@@ -379,6 +417,35 @@ def _es_pregunta_retomar(message: str) -> bool:
     semánticamente parecido (refuerzo de diseño 2026-06-23)."""
     m = _sin_acentos(message)
     return bool(_REGEX_RETOMAR.search(m)) or any(f in m for f in _FRASES_RETOMAR)
+
+
+# F4 CASCADA (2026-07-01): saludos/agradecimientos/muy cortas NO ameritan memoria
+# semántica. Medido: "hola" hacía 2 búsquedas que luego se filtran a 0 chars (trabajo
+# desperdiciado); queries triviales que rozan el umbral traían recuerdos irrelevantes.
+# El "cortacircuitos": si la query es trivial, saltar la capa semántica. CONSERVADOR —
+# solo saludos claros y mensajes muy cortos sin señal; ante la duda, NO es trivial (se
+# hace la búsqueda normal). La ventana reciente (línea de tiempo) SÍ se inyecta igual.
+_TRIVIALES = frozenset({
+    "hola", "holi", "buenas", "hey", "ola", "que tal", "que onda", "como estas",
+    "como andas", "gracias", "muchas gracias", "ok", "vale", "listo", "perfecto",
+    "genial", "bien", "si", "no", "ajaja", "jaja", "jeje", "adios", "chao", "bye",
+    "buenos dias", "buenas tardes", "buenas noches",
+})
+
+
+def _es_query_trivial(message: str) -> bool:
+    """True si el mensaje NO amerita recuperación semántica (saludo, agradecimiento,
+    muy corto sin señal). CONSERVADOR: ante la duda, False (se busca normal)."""
+    m = _sin_acentos(message).strip().rstrip("!?.¡¿").strip()
+    if not m:
+        return True
+    if m in _TRIVIALES:
+        return True
+    # muy corta (≤2 palabras) y sin ninguna palabra "de contenido" (≥5 letras)
+    palabras = m.split()
+    if len(palabras) <= 2 and not any(len(p) >= 5 for p in palabras):
+        return True
+    return False
 
 
 def _formatear_ultimo(history: list, *, max_turnos: int = 4, max_chars: int = 400) -> str:
@@ -770,32 +837,38 @@ class Conversation:
             if ultimo:
                 contexto_final = f"{contexto_final}\n\n{ultimo}" if contexto_final else ultimo
 
+        # F4 CASCADA — CORTACIRCUITOS (2026-07-01): si la query es TRIVIAL (saludo,
+        # agradecimiento, muy corta), NO recuperar memoria semántica: ahorra 2 búsquedas
+        # (medido: "hola" las hacía para nada, se filtraban a 0) y evita recuerdos
+        # irrelevantes residuales. La línea de tiempo reciente (arriba) SÍ se inyecta.
         # DOS búsquedas combinadas (2026-06-22): las preguntas del usuario se
         # parecen entre sí pero NO traen info; las RESPUESTAS del bot sí (repos,
         # hallazgos, datos). Buscar solo_asistente garantiza que entre la INFO real;
         # la búsqueda general aporta contexto adicional. Se combinan y deduplican.
-        recuerdos_info = await memory.buscar_semantico(
-            self._pool,
-            self._session_id,
-            message,
-            top_n=3,
-            excluir_ultimos=MAX_HISTORY_TURNS,
-            solo_asistente=True,
-            scope_user_id=self._scope_user_id,  # AI1: aislamiento por persona
-        )
-        recuerdos_gral = await memory.buscar_semantico(
-            self._pool,
-            self._session_id,
-            message,
-            top_n=3,
-            excluir_ultimos=MAX_HISTORY_TURNS,
-            solo_usuario=False,
-            scope_user_id=self._scope_user_id,  # AI1: aislamiento por persona
-        )
-        # info (respuestas) primero — es lo más valioso; _formatear_recuerdos dedup
-        recuerdos = recuerdos_info + recuerdos_gral
+        recuerdos: list = []
+        if not _es_query_trivial(message):
+            recuerdos_info = await memory.buscar_semantico(
+                self._pool,
+                self._session_id,
+                message,
+                top_n=3,
+                excluir_ultimos=MAX_HISTORY_TURNS,
+                solo_asistente=True,
+                scope_user_id=self._scope_user_id,  # AI1: aislamiento por persona
+            )
+            recuerdos_gral = await memory.buscar_semantico(
+                self._pool,
+                self._session_id,
+                message,
+                top_n=3,
+                excluir_ultimos=MAX_HISTORY_TURNS,
+                solo_usuario=False,
+                scope_user_id=self._scope_user_id,  # AI1: aislamiento por persona
+            )
+            # info (respuestas) primero — es lo más valioso; _formatear_recuerdos dedup
+            recuerdos = recuerdos_info + recuerdos_gral
         if recuerdos:
-            bloque = _formatear_recuerdos(recuerdos)
+            bloque = _formatear_recuerdos(recuerdos, query=message)  # F4: re-ranking por query
             contexto_final = f"{contexto}\n\n{bloque}" if contexto else bloque
 
         # 2c) GRAFO DE CONCEPTOS (H6): si la pregunta es PANORÁMICA ("¿en qué nos
